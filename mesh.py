@@ -4,7 +4,7 @@ from pylib import *
 import pandas as pd
 
 ## Config----------------------------------------------------------------------
-source = 'mesh82_utm18n'    #Mesh name not extension
+source = 'mesh91_utm18n'    #Mesh name not extension
 shapefile = False           #Output a shapefile?
 
 ## Core functions--------------------------------------------------------------
@@ -80,4 +80,4 @@ def shpmkr(source,shpname):
     
 # Get shapefile
 if shapefile:
-    shpmkr(lowDF,low_CFLs)
+    shpmkr(lowDF,'low_CFLs')
