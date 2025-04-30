@@ -79,11 +79,11 @@ end
 clearvars -except m* v* idToNode
 %% Plot
 t1 = datetime(2022, 1, 1); t2 = datetime(2022, 12, 31);
-plotTileComparison(vTemp, mTemp, idToNode.Name, 'Temperature', '°C', [t1 t2]);
-plotTileComparison(vSal, mSal, idToNode.Name, 'Salinity', 'PSU', [t1 t2]);
-plotTileComparison(vElev, mElev, idToNode.Name, 'Elevation', 'm', [t1 t2]);
+plotTileComparison(vTemp, mTemp, idToNode.Name, 'Temperature', '°C', [t1 t2],"./");
+plotTileComparison(vSal, mSal, idToNode.Name, 'Salinity', 'PSU', [t1 t2],"./");
+plotTileComparison(vElev, mElev, idToNode.Name, 'Elevation', 'm', [t1 t2],"./");
 %% Plot function
-function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, timeRange)
+function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, timeRange, saveDir)
 % Parameters:
 %   vStruct       - struct containing validation data (e.g., vTemp, vSal)
 %   mStruct       - struct containing model data (e.g., mTemp, mSal)
@@ -91,12 +91,16 @@ function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, 
 %   variableLabel - string like 'Temperature', 'Salinity', or 'Elevation'
 %   yLabel        - string label for Y-axis (e.g., '°C', 'PSU', 'm')
 %   timeRange     - optional 1x2 datetime array for x-axis limits (e.g., [startTime, endTime])
-
     if nargin < 6
         timeRange = [];  % No limit by default
     end
+    if nargin < 7
+        saveDir = '';  % If empty, don't save
+    elseif ~exist(saveDir, 'dir')
+        mkdir(saveDir);  % Create folder if it doesn't exist
+    end
     nSites = numel(siteNames);
-    figure('Name', variableLabel + " Comparison", 'Position', [100, 100, 1200, 600]);
+    fig = figure('Name', variableLabel + " Comparison", 'Position', [100, 100, 1200, 600]);
     tiledlayout('flow');
     for i = 1:nSites
         site = siteNames{i};
@@ -108,10 +112,12 @@ function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, 
             nexttile;
             hold on;
             if hasV
-                plot(vStruct.(fieldTime), vStruct.(fieldVal), 'b-', 'DisplayName', 'Validation');
+                scatter(vStruct.(fieldTime), vStruct.(fieldVal),1,...
+                    'b','filled','DisplayName', 'Validation');
             end
             if hasM
-                plot(mStruct.(fieldTime), mStruct.(fieldVal), 'r--', 'DisplayName', 'Model');
+                scatter(mStruct.(fieldTime), mStruct.(fieldVal),1,...
+                    'r','filled','DisplayName','Model');
             end
             title(site + " " + variableLabel);
             xlabel("Time");
@@ -122,5 +128,9 @@ function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, 
                 xlim(timeRange);
             end
         end
+    end
+    if ~isempty(saveDir)
+        filename = fullfile(saveDir, "Comparison_"+variableLabel+".pdf");
+        exportgraphics(fig, filename, 'ContentType', 'vector');
     end
 end
