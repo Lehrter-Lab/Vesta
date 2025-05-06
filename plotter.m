@@ -70,7 +70,7 @@ for j = 1:length(list)
                 vTemp.(char(siteName+"_Temperature")) = t(:,7);
                 vTemp.(char(siteName+"_Time")) = time;
             elseif contains(filename, 'elevation')
-                vElev.(char(siteName+"_Elevation")) = t(:,7)*0.3048;
+                vElev.(char(siteName+"_Elevation")) = t(:,7); % NOAA water level data, unit m
                 vElev.(char(siteName+"_Time")) = time;
             end
         end
