@@ -32,7 +32,7 @@ for j = 1:length(list)
         siteName = idToNode.Name{row};
 
         % Read and process the file
-        if contains(filename, 'USGS')
+        if contains(filename, 'USGS') % NAD83 & NAVD88
             t = readtable(filename, "FileType", "text", 'Delimiter', '\t');
             time = datetime(t.datetime,'TimeZone','America/New_York');
             temp = t{:,7};
@@ -45,7 +45,7 @@ for j = 1:length(list)
             vElev.(char(siteName+"_Elevation")) = elev*0.3048;
             vElev.(char(siteName+"_Time")) = time;
     
-        elseif contains(filename, 'node')
+        elseif contains(filename, 'node') 
             tRaw = readtable(filename, "FileType", "text", 'Delimiter', '\t');
             if contains(filename, 'temperature')
                 t = tRaw(tRaw.vgrid_layer == 32, :);  % Filter for top layer
@@ -63,7 +63,7 @@ for j = 1:length(list)
                 mElev.(char(siteName+"_Elevation")) = t{:,4}*-1;
                 mElev.(char(siteName+"_Time")) = time;
             end
-        elseif contains(filename, 'NOAA')
+        elseif contains(filename, 'NOAA') % MLLW
             t = readmatrix(filename);
             time = datetime(t(:,1), t(:,2), t(:,3), t(:,4), t(:,5), t(:,6),'TimeZone','America/New_York');
             if contains(filename, 'temperature')
@@ -78,16 +78,17 @@ for j = 1:length(list)
 end
 %% Sanity
 clearvars -except m* v* idToNode
+%% Bias
+bias = elevBias(mElev,vElev,idToNode.Name);
+biasCorrection = bias.Montauk;
 %% Plot
 t1 = datetime(2022, 1, 1,'TimeZone','America/New_York'); 
 t2 = datetime(2022, 12, 31,'TimeZone','America/New_York');
-plotTileComparison(vTemp, mTemp, idToNode.Name, 'Temperature', '°C', [t1 t2],"./");
-plotTileComparison(vSal, mSal, idToNode.Name, 'Salinity', 'PSU', [t1 t2],"./");
-plotTileComparison(vElev, mElev, idToNode.Name, 'Elevation', 'm', [t1 t2],"./");
-%% Get Bias
-bias = elevBias(mElev,vElev,idToNode.Name);
+plotTileComparison(vTemp, mTemp, idToNode.Name, 'Temperature', '°C', [t1 t2],"./",biasCorrection);
+plotTileComparison(vSal, mSal, idToNode.Name, 'Salinity', 'PSU', [t1 t2],"./",biasCorrection);
+plotTileComparison(vElev, mElev, idToNode.Name, 'Elevation', 'm', [t1 t2],"./",biasCorrection);
 %% Plot function
-function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, timeRange, saveDir)
+function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, timeRange, saveDir,bias)
 % Parameters:
 %   vStruct       - struct containing validation data (e.g., vTemp, vSal)
 %   mStruct       - struct containing model data (e.g., mTemp, mSal)
@@ -120,7 +121,12 @@ function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, 
                     'b','filled','DisplayName', 'Validation');
             end
             if hasM
-                scatter(mStruct.(fieldTime), mStruct.(fieldVal),1,...
+                if contains(variableLabel,'Elevation')
+                    temp = mStruct.(fieldVal)-bias;
+                else
+                    temp = mStruct.(fieldVal);
+                end
+                scatter(mStruct.(fieldTime), temp,1,...
                     'r','filled','DisplayName','Model');
             end
             title(site + " " + variableLabel);
