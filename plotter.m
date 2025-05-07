@@ -7,9 +7,10 @@ list = ["USGS*","node*","NOAA*"];
 idToNode = table;
 idToNode.Validation = [01304200; 01304562; 01304650; 8510560];
 idToNode.Model = [48505; 13488; 42773; 80345];
-idToNode.Name = ["Orient";"Peconic";"Shelter";"Montauk"];
+idToNode.Name  = ["Orient";"Peconic";"Shelter";"Montauk"];
 baseTime = datetime(2022,1,1,'TimeZone','UTC');
-
+NGVD29toNAVD88  = -0.95*0.3048; % Based on 2025 Peconic River data
+NAVD88toMSL     = -0.101;       % Based on 1983 Epoch Montauk NOAA data
 %% File parsing
 allVarNames = {'Time', 'Temperature', 'Salinity', 'Elevation'};
 vTemp = struct(); mTemp = struct();
@@ -32,7 +33,7 @@ for j = 1:length(list)
         siteName = idToNode.Name{row};
 
         % Read and process the file
-        if contains(filename, 'USGS') % NAD83 & NAVD88
+        if contains(filename, 'USGS') % NGVD29
             t = readtable(filename, "FileType", "text", 'Delimiter', '\t');
             time = datetime(t.datetime,'TimeZone','America/New_York');
             temp = t{:,7};
@@ -42,7 +43,7 @@ for j = 1:length(list)
             vTemp.(char(siteName+"_Time")) = time;
             vSal.(char(siteName+"_Salinity")) = sal;
             vSal.(char(siteName+"_Time")) = time;
-            vElev.(char(siteName+"_Elevation")) = elev*0.3048;
+            vElev.(char(siteName+"_Elevation")) = elev*0.3048+NGVD29toNAVD88+NAVD88toMSL;
             vElev.(char(siteName+"_Time")) = time;
     
         elseif contains(filename, 'node') 
@@ -63,7 +64,7 @@ for j = 1:length(list)
                 mElev.(char(siteName+"_Elevation")) = t{:,4}*-1;
                 mElev.(char(siteName+"_Time")) = time;
             end
-        elseif contains(filename, 'NOAA') % MLLW
+        elseif contains(filename, 'NOAA') % MSL
             t = readmatrix(filename);
             time = datetime(t(:,1), t(:,2), t(:,3), t(:,4), t(:,5), t(:,6),'TimeZone','America/New_York');
             if contains(filename, 'temperature')
