@@ -70,7 +70,7 @@ for j = 1:length(list)
                 vTemp.(char(siteName+"_Temperature")) = t(:,7);
                 vTemp.(char(siteName+"_Time")) = time;
             elseif contains(filename, 'elevation')
-                vElev.(char(siteName+"_Elevation")) = t(:,7); % NOAA water level data, unit m
+                vElev.(char(siteName+"_Elevation")) = t(:,7);
                 vElev.(char(siteName+"_Time")) = time;
             end
         end
@@ -84,6 +84,8 @@ t2 = datetime(2022, 12, 31,'TimeZone','America/New_York');
 plotTileComparison(vTemp, mTemp, idToNode.Name, 'Temperature', '°C', [t1 t2],"./");
 plotTileComparison(vSal, mSal, idToNode.Name, 'Salinity', 'PSU', [t1 t2],"./");
 plotTileComparison(vElev, mElev, idToNode.Name, 'Elevation', 'm', [t1 t2],"./");
+%% Get Bias
+bias = elevBias(mElev,vElev,idToNode.Name);
 %% Plot function
 function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, timeRange, saveDir)
 % Parameters:
@@ -134,5 +136,20 @@ function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, 
     if ~isempty(saveDir)
         filename = fullfile(saveDir, "Comparison_"+variableLabel+".pdf");
         exportgraphics(fig, filename, 'ContentType', 'vector');
+    end
+end
+%% Bias Function
+function biasTable = elevBias(mElev,vElev,sites)
+    for i = 1:height(sites)
+        site = sites{i};
+        field = site + "_Elevation";
+        time  = site + "_Time";
+        vData = vElev.(field);
+        vTime = vElev.(time);
+        vData = vData(vTime>=datetime(2022, 1, 1,'TimeZone','America/New_York'));
+        mData = mElev.(field);
+        mTime = mElev.(time);
+        mData = mData(mTime>=datetime(2022, 1, 1,'TimeZone','America/New_York'));
+        biasTable.(site) = mean(mData,"omitnan")-mean(vData,"omitnan");
     end
 end
