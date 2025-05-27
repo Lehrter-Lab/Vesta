@@ -6,9 +6,10 @@ path = "./Source/";
 list = ["USGS*","node*","NOAA*"];
 idToNode = table;
 idToNode.Validation = [01304200; 01304562; 01304650; 8510560];
-idToNode.Model = [48505; 13488; 42773; 80345];
+idToNode.Model = [48821; 13490; 43039; 80775]; % [48505; 13488; 42773; 80345]
 idToNode.Name  = ["Orient";"Peconic";"Shelter";"Montauk"];
-baseTime = datetime(2022,1,1,'TimeZone','UTC');
+baseYear = 2021;
+baseTime = datetime(baseYear,1,1,'TimeZone','UTC');
 NGVD29toNAVD88  = -0.95*0.3048; % Based on 2025 Peconic River data
 NAVD88toMSL     = -0.101;       % Based on 1983 Epoch Montauk NOAA data
 %% File parsing
@@ -17,11 +18,17 @@ vTemp = struct(); mTemp = struct();
 vSal  = struct(); mSal  = struct();
 vElev = struct(); mElev = struct();
 
+boolM = string(idToNode.Model);
+boolV = string(idToNode.Validation);
 for j = 1:length(list)
     folder = dir(path+list(j));
     for i = 1:length(folder)
         filename = path+folder(i).name;
         parts = split(filename, "_");
+        if ~contains(filename,boolM) && ~contains(filename,boolV)
+            disp(filename)
+            continue
+        end
         % Extract site ID and match to the correct name
         if contains(filename, "USGS") || contains(filename, "NOAA")
             siteID = str2double(parts{2});
@@ -78,13 +85,13 @@ for j = 1:length(list)
     end
 end
 %% Sanity
-clearvars -except m* v* idToNode
+clearvars -except m* v* idToNode base*
 %% Bias
-bias = elevBias(mElev,vElev,idToNode.Name);
+bias = elevBias(mElev,vElev,idToNode.Name,baseTime);
 biasCorrection = bias.Montauk;
 %% Plot
-t1 = datetime(2022, 1, 1,'TimeZone','America/New_York'); 
-t2 = datetime(2022, 12, 31,'TimeZone','America/New_York');
+t1 = datetime(baseTime,'TimeZone','America/New_York'); 
+t2 = datetime(baseYear, 12, 31,'TimeZone','America/New_York');
 plotTileComparison(vTemp, mTemp, idToNode.Name, 'Temperature', '°C', [t1 t2],"./",biasCorrection);
 plotTileComparison(vSal, mSal, idToNode.Name, 'Salinity', 'PSU', [t1 t2],"./",biasCorrection);
 plotTileComparison(vElev, mElev, idToNode.Name, 'Elevation', 'm', [t1 t2],"./",biasCorrection);
@@ -146,17 +153,17 @@ function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, 
     end
 end
 %% Bias Function
-function biasTable = elevBias(mElev,vElev,sites)
+function biasTable = elevBias(mElev,vElev,sites,baseTime)
     for i = 1:height(sites)
         site = sites{i};
         field = site + "_Elevation";
         time  = site + "_Time";
         vData = vElev.(field);
         vTime = vElev.(time);
-        vData = vData(vTime>=datetime(2022, 1, 1,'TimeZone','America/New_York'));
+        vData = vData(vTime>=datetime(baseTime,'TimeZone','America/New_York'));
         mData = mElev.(field);
         mTime = mElev.(time);
-        mData = mData(mTime>=datetime(2022, 1, 1,'TimeZone','America/New_York'));
+        mData = mData(mTime>=datetime(baseTime,'TimeZone','America/New_York'));
         biasTable.(site) = mean(mData,"omitnan")-mean(vData,"omitnan");
     end
 end
