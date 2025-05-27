@@ -98,7 +98,7 @@ for j = 1:length(list)
     end
 end
 %% Sanity
-clearvars -except m* v* idToNode base* times varInfo saveDir
+clearvars -except m* v* idToNode base* times varInfo saveDir t1 t2
 %% Generate time filtered paired datasets
 pairTemp = caller(vTemp,mTemp,idToNode.Name,'Temperature',times,baseTime);
 pairSal  = caller(vSal, mSal, idToNode.Name,'Salinity',   times,baseTime);
@@ -107,9 +107,15 @@ pairElev = caller(vElev,mElev,idToNode.Name,'Elevation',  times,baseTime);
 bias = elevBias(pairElev);
 biasCorrection = bias.Montauk;
 %% Plot
-%plotTileComparison(vTemp,mTemp,idToNode.Name,varInfo.Name(1),varInfo.Unit(1),times,biasCorrection,saveDir);
-%plotTileComparison(vSal, mSal, idToNode.Name,varInfo.Name(2),varInfo.Unit(2),times,biasCorrection,saveDir);
-%plotTileComparison(vElev,mElev,idToNode.Name,varInfo.Name(3),varInfo.Unit(3),times,biasCorrection,saveDir);
+%plotTileComparison(pairTemp,'Temperature','°C', [t1 t2],biasCorrection,saveDir);
+%plotTileComparison(pairSal, 'Salinity',   'PSU',[t1 t2],biasCorrection,saveDir);
+%plotTileComparison(pairElev,'Elevation',  'm',  [t1 t2],biasCorrection,saveDir);
+%% Kling-Gupta
+KGE_Temp = klinggupta(pairTemp);
+KGE_Sal  = klinggupta(pairSal);
+KGE_Elev = klinggupta(pairElev);
+%% Sanity
+clearvars -except pair* bias* KGE*
 %% Master Func
 function pairTable = caller(vStruct,mStruct,siteNames,variableLabel,times,baseTime)
     for i = 1:numel(siteNames)
@@ -149,43 +155,63 @@ columns = pairElev.Properties.VariableNames;
     end
 end
 %% Plot function
-function plotTileComparison(pairTable, siteNames, yLabel, timeRange, bias, saveDir)
+function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, saveDir)
     fig = figure('Name', variableLabel + " Comparison", 'Position', [100, 100, 1200, 600]);
     tiledlayout('flow');
-    nexttile;
-    hold on;
-    scatter(vStruct.(fieldTime), vStruct.(fieldVal),1,...
-        'b','filled','DisplayName', 'Validation');
-    if contains(variableLabel,'Elevation')
-        temp = mStruct.(fieldVal)-bias;
-    else
-        temp = mStruct.(fieldVal);
-    end
-    scatter(mStruct.(fieldTime), temp,1,...
-        'r','filled','DisplayName','Model');
-    title(site + " " + variableLabel);
-    xlabel("Time");
-    ylabel(yLabel);
-    legend('Location', 'best');
-    grid on;
-    if ~isempty(timeRange)
-        xlim(timeRange);
+    columns = pairTable.Properties.VariableNames;
+    for i = 1:width(pairTable)
+        site = extractBefore(columns{i},"_");
+        if mod(i,2) == 1
+            nexttile;
+            scatter(pairTable,"Time",i, ...
+                'filled','MarkerFaceColor','blue','SizeData',1,'DisplayName', 'Validation');
+            hold on
+        else
+            if contains(variableLabel,'Elevation') && ~contains(site,"Montauk")
+                pairTable{:,i} = pairTable{:,i}-bias;
+                scatter(pairTable,"Time",i, ...
+                    'filled','MarkerFaceColor','red','SizeData',1,'DisplayName','Model');
+            else
+                scatter(pairTable,"Time",i, ...
+                    'filled','MarkerFaceColor','red','SizeData',1,'DisplayName','Model');
+            end
+        end
+        title(site + " " + variableLabel);
+        xlabel("Time");
+        ylabel(yLabel);
+        legend('Location', 'best');
+        grid on;
+        if ~isempty(timeRange)
+            xlim(timeRange);
+        end
+        minY = min(min(pairTable.Variables));
+        maxY = max(max(pairTable.Variables));
+        ylim([minY maxY]*1.1)
     end
     filename = fullfile(saveDir, "Comparison_"+variableLabel+".pdf");
     exportgraphics(fig, filename, 'ContentType', 'vector');
 end
 %% Kling-Gupta
-function [kge,r,alpha,beta] = klinggupta(model,validation)
-model(isnan(validation)) = NaN;
-varin  = [model,validation];
-mStd   = std(model,"omitnan");
-vStd   = std(validation,"omitnan");
-mMean  = mean(modelled,"omitnan");
-vMean  = mean(validation,"omitnan");
-r      = corrcoef(varin,'rows','pairwise'); 
-r      = r(1,2);
-alpha  = mStd/vStd;   % variability of prediction errors
-beta   = mMean/vMean; % bias
-%KGE timeseries 
-kge    = 1-sqrt(((r-1)^2) + ((alpha-1)^2) + ((beta-1)^2));
+function output = klinggupta(pairTable)
+    output = table('RowNames',{'KGE','r','alpha','beta'});
+    columns = pairTable.Properties.VariableNames;
+    for i = 1:(width(pairTable)/2)
+        site = extractBefore(columns{i*2-1},"_");
+        model      = pairTable{:,i*2};
+        validation = pairTable{:,i*2-1};
+        mStd  = std(model,"omitnan");
+        vStd  = std(validation,"omitnan");
+        mMean = mean(model,"omitnan");
+        vMean = mean(validation,"omitnan");
+        corr  = corrcoef([model,validation],'rows','pairwise'); 
+        corr  = corr(1,2);
+        pred  = mStd/vStd;   % variability of prediction errors
+        bias  = mMean/vMean; % bias
+        klinggupta = 1-sqrt(((corr-1)^2) + ((pred-1)^2) + ((bias-1)^2));
+        % Save in site specific structs
+        output.(site)(1) = klinggupta;
+        output.(site)(2) = corr;
+        output.(site)(3) = pred;
+        output.(site)(4) = bias;
+    end
 end
