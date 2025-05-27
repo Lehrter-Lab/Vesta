@@ -4,16 +4,30 @@ warning('off','MATLAB:print:ContentTypeImageSuggested');
 %% Parameters
 path = "./Source/";
 list = ["USGS*","node*","NOAA*"];
-idToNode = table;
+% Mapping Table
+idToNode            = table;
+idToNode.Name       = ["Orient";"Peconic";"Shelter";"Montauk"];
 idToNode.Validation = [01304200; 01304562; 01304650; 8510560];
-idToNode.Model = [48821; 13490; 43039; 80775]; % [48505; 13488; 42773; 80345]
-idToNode.Name  = ["Orient";"Peconic";"Shelter";"Montauk"];
+idToNode.Model      = [48821; 13490; 43039; 80775]; % [48505; 13488; 42773; 80345]
+% Offset for differing datums
+NGVD29toNAVD88 = -0.95*0.3048; % Based on 2025 Peconic River data
+NAVD88toMSL    = -0.101;       % Based on 1983 Epoch Montauk NOAA data
+% Validation Window
 baseYear = 2021;
 baseTime = datetime(baseYear,1,1,'TimeZone','UTC');
-NGVD29toNAVD88  = -0.95*0.3048; % Based on 2025 Peconic River data
-NAVD88toMSL     = -0.101;       % Based on 1983 Epoch Montauk NOAA data
+t1 = datetime(baseTime,'TimeZone','America/New_York'); 
+t2 = datetime(baseYear, 12, 31,'TimeZone','America/New_York');
+times = timerange(t1,t2);
+% Variable info
+varInfo = table;
+varInfo.Name = ["Temperature";"Salinity";"Elevation"];
+varInfo.Unit = ["°C";"PSU";"m"];
+% Figure outputs
+saveDir = "./";
+if ~exist(saveDir, 'dir')
+    mkdir(saveDir);
+end
 %% File parsing
-allVarNames = {'Time', 'Temperature', 'Salinity', 'Elevation'};
 vTemp = struct(); mTemp = struct();
 vSal  = struct(); mSal  = struct();
 vElev = struct(); mElev = struct();
@@ -26,7 +40,6 @@ for j = 1:length(list)
         filename = path+folder(i).name;
         parts = split(filename, "_");
         if ~contains(filename,boolM) && ~contains(filename,boolV)
-            disp(filename)
             continue
         end
         % Extract site ID and match to the correct name
@@ -85,85 +98,94 @@ for j = 1:length(list)
     end
 end
 %% Sanity
-clearvars -except m* v* idToNode base*
-%% Bias
-bias = elevBias(mElev,vElev,idToNode.Name,baseTime);
+clearvars -except m* v* idToNode base* times varInfo saveDir
+%% Generate time filtered paired datasets
+pairTemp = caller(vTemp,mTemp,idToNode.Name,'Temperature',times,baseTime);
+pairSal  = caller(vSal, mSal, idToNode.Name,'Salinity',   times,baseTime);
+pairElev = caller(vElev,mElev,idToNode.Name,'Elevation',  times,baseTime);
+%% Get elevation bias
+bias = elevBias(pairElev);
 biasCorrection = bias.Montauk;
 %% Plot
-t1 = datetime(baseTime,'TimeZone','America/New_York'); 
-t2 = datetime(baseYear, 12, 31,'TimeZone','America/New_York');
-plotTileComparison(vTemp, mTemp, idToNode.Name, 'Temperature', '°C', [t1 t2],"./",biasCorrection);
-plotTileComparison(vSal, mSal, idToNode.Name, 'Salinity', 'PSU', [t1 t2],"./",biasCorrection);
-plotTileComparison(vElev, mElev, idToNode.Name, 'Elevation', 'm', [t1 t2],"./",biasCorrection);
-%% Plot function
-function plotTileComparison(vStruct, mStruct, siteNames, variableLabel, yLabel, timeRange, saveDir,bias)
-% Parameters:
-%   vStruct       - struct containing validation data (e.g., vTemp, vSal)
-%   mStruct       - struct containing model data (e.g., mTemp, mSal)
-%   siteNames     - cell array of site names (e.g., idToNode.Name)
-%   variableLabel - string like 'Temperature', 'Salinity', or 'Elevation'
-%   yLabel        - string label for Y-axis (e.g., '°C', 'PSU', 'm')
-%   timeRange     - optional 1x2 datetime array for x-axis limits (e.g., [startTime, endTime])
-    if nargin < 6
-        timeRange = [];  % No limit by default
-    end
-    if nargin < 7
-        saveDir = '';  % If empty, don't save
-    elseif ~exist(saveDir, 'dir')
-        mkdir(saveDir);  % Create folder if it doesn't exist
-    end
-    nSites = numel(siteNames);
-    fig = figure('Name', variableLabel + " Comparison", 'Position', [100, 100, 1200, 600]);
-    tiledlayout('flow');
-    for i = 1:nSites
-        site = siteNames{i};
-        fieldVal = site + "_" + variableLabel;
-        fieldTime = site + "_Time";
-        hasV = isfield(vStruct, fieldVal) && isfield(vStruct, fieldTime);
-        hasM = isfield(mStruct, fieldVal) && isfield(mStruct, fieldTime);
-        if hasV || hasM
-            nexttile;
-            hold on;
-            if hasV
-                scatter(vStruct.(fieldTime), vStruct.(fieldVal),1,...
-                    'b','filled','DisplayName', 'Validation');
-            end
-            if hasM
-                if contains(variableLabel,'Elevation')
-                    temp = mStruct.(fieldVal)-bias;
-                else
-                    temp = mStruct.(fieldVal);
-                end
-                scatter(mStruct.(fieldTime), temp,1,...
-                    'r','filled','DisplayName','Model');
-            end
-            title(site + " " + variableLabel);
-            xlabel("Time");
-            ylabel(yLabel);
-            legend('Location', 'best');
-            grid on;
-            if ~isempty(timeRange)
-                xlim(timeRange);
-            end
+%plotTileComparison(vTemp,mTemp,idToNode.Name,varInfo.Name(1),varInfo.Unit(1),times,biasCorrection,saveDir);
+%plotTileComparison(vSal, mSal, idToNode.Name,varInfo.Name(2),varInfo.Unit(2),times,biasCorrection,saveDir);
+%plotTileComparison(vElev,mElev,idToNode.Name,varInfo.Name(3),varInfo.Unit(3),times,biasCorrection,saveDir);
+%% Master Func
+function pairTable = caller(vStruct,mStruct,siteNames,variableLabel,times,baseTime)
+    for i = 1:numel(siteNames)
+        site          = siteNames{i};
+        fieldVal      = site + "_" + variableLabel;
+        fieldTime     = site + "_Time";
+        vTable        = table;
+        mTable        = table;
+        try
+            vTable.(site) = vStruct.(fieldVal);
+            vTable.Time   = vStruct.(fieldTime);
+            Validation    = table2timetable(vTable,'RowTimes','Time');
+        catch
+            warning([site ' is missing ' variableLabel ' data'])
+            Validation = timetable('RowTimes',baseTime);
         end
-    end
-    if ~isempty(saveDir)
-        filename = fullfile(saveDir, "Comparison_"+variableLabel+".pdf");
-        exportgraphics(fig, filename, 'ContentType', 'vector');
+        mTable.(site) = mStruct.(fieldVal);
+        mTable.Time   = mStruct.(fieldTime);
+        Model         = table2timetable(mTable,'RowTimes','Time');
+        pairCurrent   = synchronize(Validation,Model);
+        pairCurrent   = pairCurrent(times,:); 
+        if i == 1
+            pairTable = pairCurrent;
+        else
+            pairTable = synchronize(pairTable,pairCurrent);
+        end
     end
 end
 %% Bias Function
-function biasTable = elevBias(mElev,vElev,sites,baseTime)
-    for i = 1:height(sites)
-        site = sites{i};
-        field = site + "_Elevation";
-        time  = site + "_Time";
-        vData = vElev.(field);
-        vTime = vElev.(time);
-        vData = vData(vTime>=datetime(baseTime,'TimeZone','America/New_York'));
-        mData = mElev.(field);
-        mTime = mElev.(time);
-        mData = mData(mTime>=datetime(baseTime,'TimeZone','America/New_York'));
+function biasTable = elevBias(pairElev)
+columns = pairElev.Properties.VariableNames;
+    for i = 1:(width(pairElev)/2)
+        site = extractBefore(columns{i*2-1},"_");
+        mData = pairElev.(columns{i*2});
+        vData = pairElev.(columns{i*2-1});
         biasTable.(site) = mean(mData,"omitnan")-mean(vData,"omitnan");
     end
+end
+%% Plot function
+function plotTileComparison(pairTable, siteNames, yLabel, timeRange, bias, saveDir)
+    fig = figure('Name', variableLabel + " Comparison", 'Position', [100, 100, 1200, 600]);
+    tiledlayout('flow');
+    nexttile;
+    hold on;
+    scatter(vStruct.(fieldTime), vStruct.(fieldVal),1,...
+        'b','filled','DisplayName', 'Validation');
+    if contains(variableLabel,'Elevation')
+        temp = mStruct.(fieldVal)-bias;
+    else
+        temp = mStruct.(fieldVal);
+    end
+    scatter(mStruct.(fieldTime), temp,1,...
+        'r','filled','DisplayName','Model');
+    title(site + " " + variableLabel);
+    xlabel("Time");
+    ylabel(yLabel);
+    legend('Location', 'best');
+    grid on;
+    if ~isempty(timeRange)
+        xlim(timeRange);
+    end
+    filename = fullfile(saveDir, "Comparison_"+variableLabel+".pdf");
+    exportgraphics(fig, filename, 'ContentType', 'vector');
+end
+%% Kling-Gupta
+function [kge,r,alpha,beta] = klinggupta(model,validation)
+model(isnan(validation)) = NaN;
+varin  = [model,validation];
+mStd   = std(model,"omitnan");
+vStd   = std(validation,"omitnan");
+mMean  = mean(modelled,"omitnan");
+vMean  = mean(validation,"omitnan");
+r      = corrcoef(varin,'rows','pairwise'); 
+r      = r(1,2);
+alpha  = mStd/vStd;   % variability of prediction errors
+beta   = mMean/vMean; % bias
+%KGE timeseries 
+kge    = 1-sqrt(((r-1)^2) + ((alpha-1)^2) + ((beta-1)^2));
 end
