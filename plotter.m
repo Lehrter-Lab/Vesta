@@ -107,9 +107,9 @@ pairElev = caller(vElev,mElev,idToNode.Name,'Elevation',  times,baseTime);
 bias = elevBias(pairElev);
 biasCorrection = bias.Montauk;
 %% Plot
-%plotTileComparison(pairTemp,'Temperature','°C', [t1 t2],biasCorrection,saveDir);
-%plotTileComparison(pairSal, 'Salinity',   'PSU',[t1 t2],biasCorrection,saveDir);
-%plotTileComparison(pairElev,'Elevation',  'm',  [t1 t2],biasCorrection,saveDir);
+plotTileComparison(pairTemp,'Temperature','°C', [t1 t2],biasCorrection,saveDir);
+plotTileComparison(pairSal, 'Salinity',   'PSU',[t1 t2],biasCorrection,saveDir);
+plotTileComparison(pairElev,'Elevation',  'm',  [t1 t2],biasCorrection,saveDir);
 %% Kling-Gupta
 KGE_Temp = klinggupta(pairTemp);
 KGE_Sal  = klinggupta(pairSal);
@@ -159,21 +159,26 @@ function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, s
     fig = figure('Name', variableLabel + " Comparison", 'Position', [100, 100, 1200, 600]);
     tiledlayout('flow');
     columns = pairTable.Properties.VariableNames;
+    color = [1,0,0,0.25];
+    lw = 1;
+    sz = 1;
     for i = 1:width(pairTable)
         site = extractBefore(columns{i},"_");
         if mod(i,2) == 1
             nexttile;
             scatter(pairTable,"Time",i, ...
-                'filled','MarkerFaceColor','blue','SizeData',1,'DisplayName', 'Validation');
+                'filled','MarkerFaceColor','blue','SizeData',sz,'DisplayName', 'Validation');
             hold on
         else
             if contains(variableLabel,'Elevation') && ~contains(site,"Montauk")
                 pairTable{:,i} = pairTable{:,i}-bias;
-                scatter(pairTable,"Time",i, ...
-                    'filled','MarkerFaceColor','red','SizeData',1,'DisplayName','Model');
+                mask = isfinite(pairTable{:,i});
+                plot(pairTable.Time(mask), pairTable{mask,i}, ...
+                    'Color',color,'LineWidth',lw,'DisplayName','Model');
             else
-                scatter(pairTable,"Time",i, ...
-                    'filled','MarkerFaceColor','red','SizeData',1,'DisplayName','Model');
+                mask = isfinite(pairTable{:,i});
+                plot(pairTable.Time(mask), pairTable{mask,i}, ...
+                    'Color',color,'LineWidth',lw,'DisplayName','Model');
             end
         end
         title(site + " " + variableLabel);
