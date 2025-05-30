@@ -77,21 +77,22 @@ for s = 1:length(masterSuffixes)
             % Only process valid nodes that exist in the file
             validNodes = nodeList <= allNodes;
             targetNodeIndices = nodeList(validNodes);
-            % Get the required nodes
-            try
-                if strcmp(var, 'elevation')
-                    rawData = ncread(varFile, var, [min(targetNodeIndices),1], [length(targetNodeIndices), numTime]);
-                    dataBlock = reshape(rawData, [1, length(targetNodeIndices), numTime]);
-                else
-                    dataBlock = ncread(varFile, var, [1, min(targetNodeIndices), 1], [numLayers, length(targetNodeIndices), numTime]);
+            % Get the required nodes one at a time and stuff in dataBlock
+            for numNodes = 1:length(targetNodeIndices)
+                try
+                    if strcmp(var, 'elevation')
+                        rawData = ncread(varFile, var, [targetNodeIndices(numNodes),1],[1,numTime]);
+                        dataBlock = reshape(rawData, [1, length(targetNodeIndices), numTime]);
+                    else
+                        dataBlock = ncread(varFile, var, [1, targetNodeIndices(numNodes), 1],[numLayers,1,numTime]);
+                    end
+                    fullBlock(:, numNodes, :) = dataBlock;
+                catch e
+                    % Handle any ncread errors
+                    fprintf('Error reading %s for time step %s: %s\n', var, char(suffix), e.message);
                 end
-                fullBlock(:, nodePos(validNodes), :) = dataBlock;
-                varDataAll(var) = {fullBlock};
-            catch e
-                % Handle any ncread errors
-                fprintf('Error reading %s for time step %s: %s\n', var, char(suffix), e.message);
-                varDataAll(var) = {NaN(numLayers, nodeCount, numTime)};
             end
+            varDataAll(var) = {fullBlock};
         else
             % If variable file is missing, fill with NaN
             varDataAll(var) = {NaN(numLayers, nodeCount, numTime)};
