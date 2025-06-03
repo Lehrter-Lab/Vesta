@@ -1,6 +1,7 @@
 %% CMikolaitis @ USA/DISL, 2025
 warning('off','MATLAB:table:ModifiedAndSavedVarnames');
 warning('off','MATLAB:print:ContentTypeImageSuggested');
+clear all
 %% Parameters
 path = "./Source/";
 list = ["USGS*","node*","NOAA*"];
@@ -8,7 +9,7 @@ list = ["USGS*","node*","NOAA*"];
 idToNode            = table;
 idToNode.Name       = ["Orient";"Peconic";"Shelter";"Montauk"];
 idToNode.Validation = [01304200; 01304562; 01304650; 8510560];
-idToNode.Model      = [48821; 13490; 43039; 80775]; % [48505; 13488; 42773; 80345]
+idToNode.Model      = [48505; 13488; 42773; 80345]; % [48821; 13490; 43039; 80775]
 % Offset for differing datums
 NGVD29toNAVD88 = -0.95*0.3048; % Based on 2025 Peconic River data
 NAVD88toMSL    = -0.101;       % Based on 1983 Epoch Montauk NOAA data
@@ -56,53 +57,54 @@ for j = 1:length(list)
         if contains(filename, 'USGS') % NGVD29
             t = readtable(filename, "FileType", "text", 'Delimiter', '\t');
             time = datetime(t.datetime,'TimeZone','America/New_York');
-            temp = t{:,7};
-            sal  = t{:,9};
-            elev = t{:,5};
-            vTemp.(char(siteName+"_Temperature")) = temp;
-            vTemp.(char(siteName+"_Time")) = time;
-            vSal.(char(siteName+"_Salinity")) = sal;
-            vSal.(char(siteName+"_Time")) = time;
-            vElev.(char(siteName+"_Elevation")) = elev*0.3048+NGVD29toNAVD88+NAVD88toMSL;
-            vElev.(char(siteName+"_Time")) = time;
+            out  = table2timetable(t,'RowTimes',time);
+            vNames = out.Properties.VariableNames;
+            out  = renamevars(out,[string(vNames{7}),string(vNames{9}),string(vNames{5})], ...
+                ["temperature","salinity","elevation"]);
+            out.elevation = out.elevation*0.3048+NGVD29toNAVD88+NAVD88toMSL;
+            vTemp.(char(siteName)) = out(:,7);
+            vSal.(char(siteName))  = out(:,9);
+            vElev.(char(siteName)) = out(:,5);
     
         elseif contains(filename, 'node') 
             tRaw = readtable(filename, "FileType", "text", 'Delimiter', '\t');
             if contains(filename, 'temperature')
                 t = tRaw(tRaw.vgrid_layer == 32, :);  % Filter for top layer
                 time = baseTime + seconds(t.time);
-                mTemp.(char(siteName+"_Temperature")) = t{:,4};
-                mTemp.(char(siteName+"_Time")) = time;
+                time = datetime(time,'TimeZone','America/New_York');
+                out  = table2timetable(t,'RowTimes',time);
+                mTemp.(char(siteName)) = out(:,4);
             elseif contains(filename, 'salinity')
                 t = tRaw(tRaw.vgrid_layer == 32, :);  % Filter for top layer
                 time = baseTime + seconds(t.time);
-                mSal.(char(siteName+"_Salinity")) = t{:,4};
-                mSal.(char(siteName+"_Time")) = time;
+                time = datetime(time,'TimeZone','America/New_York');
+                out  = table2timetable(t,'RowTimes',time);
+                mSal.(char(siteName)) = out(:,4);
             elseif contains(filename, 'elevation')
                 t = tRaw(tRaw.vgrid_layer == 1, :);
                 time = baseTime + seconds(t.time);
-                mElev.(char(siteName+"_Elevation")) = t{:,4}*-1;
-                mElev.(char(siteName+"_Time")) = time;
+                time = datetime(time,'TimeZone','America/New_York');
+                out  = table2timetable(t,'RowTimes',time);
+                mElev.(char(siteName)) = out(:,4);
             end
         elseif contains(filename, 'NOAA') % MSL
-            t = readmatrix(filename);
+            t    = readmatrix(filename);
             time = datetime(t(:,1), t(:,2), t(:,3), t(:,4), t(:,5), t(:,6),'TimeZone','America/New_York');
+            out  = timetable(time,t(:,7));
             if contains(filename, 'temperature')
-                vTemp.(char(siteName+"_Temperature")) = t(:,7);
-                vTemp.(char(siteName+"_Time")) = time;
+                out = renamevars(out,'Var1','temperature');
+                vTemp.(char(siteName)) = out;
             elseif contains(filename, 'elevation')
-                vElev.(char(siteName+"_Elevation")) = t(:,7);
-                vElev.(char(siteName+"_Time")) = time;
+                out = renamevars(out,'Var1','elevation');
+                vElev.(char(siteName)) = out;
             end
         end
     end
 end
-%% Sanity
-clearvars -except m* v* idToNode base* times varInfo saveDir t1 t2
 %% Generate time filtered paired datasets
-pairTemp = caller(vTemp,mTemp,idToNode.Name,'Temperature',times,baseTime);
-pairSal  = caller(vSal, mSal, idToNode.Name,'Salinity',   times,baseTime);
-pairElev = caller(vElev,mElev,idToNode.Name,'Elevation',  times,baseTime);
+pairTemp = caller(vTemp,mTemp);
+pairSal  = caller(vSal, mSal);
+pairElev = caller(vElev,mElev);
 %% Get elevation bias
 bias = elevBias(pairElev);
 biasCorrection = bias.Montauk;
@@ -117,40 +119,26 @@ KGE_Elev = klinggupta(pairElev);
 %% Sanity
 clearvars -except pair* bias* KGE*
 %% Master Func
-function pairTable = caller(vStruct,mStruct,siteNames,variableLabel,times,baseTime)
-    for i = 1:numel(siteNames)
-        site          = siteNames{i};
-        fieldVal      = site + "_" + variableLabel;
-        fieldTime     = site + "_Time";
-        vTable        = table;
-        mTable        = table;
-        try
-            vTable.(site) = vStruct.(fieldVal);
-            vTable.Time   = vStruct.(fieldTime);
-            Validation    = table2timetable(vTable,'RowTimes','Time');
-        catch
-            warning([site ' is missing ' variableLabel ' data'])
-            Validation = timetable('RowTimes',baseTime);
-        end
-        mTable.(site) = mStruct.(fieldVal);
-        mTable.Time   = mStruct.(fieldTime);
-        Model         = table2timetable(mTable,'RowTimes','Time');
-        pairCurrent   = synchronize(Validation,Model);
-        pairCurrent   = pairCurrent(times,:); 
-        if i == 1
-            pairTable = pairCurrent;
-        else
-            pairTable = synchronize(pairTable,pairCurrent);
-        end
+function pairTable = caller(vStruct,mStruct)
+    sites      = fieldnames(vStruct);
+    Validation = vStruct.(sites{1});
+    Model      = mStruct.(sites{1});
+    for i = 2:length(sites)
+        Validation = synchronize(Validation,vStruct.(sites{i}),"union",'fillwithmissing');
+        Model      = synchronize(Model,mStruct.(sites{i}),"union",'fillwithmissing');
     end
+    Validation = renamevars(Validation,Validation.Properties.VariableNames,sites);
+    Model      = renamevars(Model,Model.Properties.VariableNames,sites);
+    pairTable  = synchronize(Validation,Model,"union",'fillwithmissing');
 end
 %% Bias Function
 function biasTable = elevBias(pairElev)
 columns = pairElev.Properties.VariableNames;
     for i = 1:(width(pairElev)/2)
-        site = extractBefore(columns{i*2-1},"_");
-        mData = pairElev.(columns{i*2});
-        vData = pairElev.(columns{i*2-1});
+        ia = i+(width(pairElev)/2);
+        site = extractBefore(columns{i},"_");
+        mData = pairElev.(columns{ia});
+        vData = pairElev.(columns{i});
         biasTable.(site) = mean(mData,"omitnan")-mean(vData,"omitnan");
     end
 end
@@ -162,24 +150,23 @@ function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, s
     color = [1,0,0,0.25];
     lw = 1;
     sz = 1;
-    for i = 1:width(pairTable)
+    time = pairTable.Properties.DimensionNames{1};
+    for i = 1:(width(pairTable)/2)
+        ia   = i+(width(pairTable)/2);
         site = extractBefore(columns{i},"_");
-        if mod(i,2) == 1
-            nexttile;
-            scatter(pairTable,"Time",i, ...
-                'filled','MarkerFaceColor','blue','SizeData',sz,'DisplayName', 'Validation');
-            hold on
+        nexttile;
+        scatter(pairTable,time,i, ...
+            'filled','MarkerFaceColor','blue','SizeData',sz,'DisplayName', 'Validation');
+        hold on
+        if contains(variableLabel,'Elevation') && ~contains(site,"Montauk")
+            pairTable{:,ia} = pairTable{:,ia}-bias;
+            mask = isfinite(pairTable{:,ia});
+            plot(pairTable.(time)(mask), pairTable{mask,ia}, ...
+                'Color',color,'LineWidth',lw,'DisplayName','Model');
         else
-            if contains(variableLabel,'Elevation') && ~contains(site,"Montauk")
-                pairTable{:,i} = pairTable{:,i}-bias;
-                mask = isfinite(pairTable{:,i});
-                plot(pairTable.Time(mask), pairTable{mask,i}, ...
-                    'Color',color,'LineWidth',lw,'DisplayName','Model');
-            else
-                mask = isfinite(pairTable{:,i});
-                plot(pairTable.Time(mask), pairTable{mask,i}, ...
-                    'Color',color,'LineWidth',lw,'DisplayName','Model');
-            end
+            mask = isfinite(pairTable{:,ia});
+            plot(pairTable.(time)(mask), pairTable{mask,ia}, ...
+                'Color',color,'LineWidth',lw,'DisplayName','Model');
         end
         title(site + " " + variableLabel);
         xlabel("Time");
@@ -193,17 +180,20 @@ function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, s
         maxY = max(max(pairTable.Variables));
         ylim([minY maxY]*1.1)
     end
-    filename = fullfile(saveDir, "Comparison_"+variableLabel+".pdf");
-    exportgraphics(fig, filename, 'ContentType', 'vector');
+    %filename = fullfile(saveDir, "Comparison_"+variableLabel+".pdf");
+    %exportgraphics(fig, filename, 'ContentType', 'vector');
+    filename = fullfile(saveDir, "Comparison_"+variableLabel+".fig");
+    savefig(fig,filename);
 end
 %% Kling-Gupta
 function output = klinggupta(pairTable)
     output = table('RowNames',{'KGE','r','alpha','beta'});
     columns = pairTable.Properties.VariableNames;
     for i = 1:(width(pairTable)/2)
-        site = extractBefore(columns{i*2-1},"_");
-        model      = pairTable{:,i*2};
-        validation = pairTable{:,i*2-1};
+        ia   = i+(width(pairTable)/2);
+        site = extractBefore(columns{i},"_");
+        model      = pairTable{:,ia};
+        validation = pairTable{:,i};
         mStd  = std(model,"omitnan");
         vStd  = std(validation,"omitnan");
         mMean = mean(model,"omitnan");
