@@ -82,7 +82,7 @@ for s = 1:length(masterSuffixes)
                 try
                     if strcmp(var, 'elevation')
                         rawData = ncread(varFile, var, [targetNodeIndices(numNodes),1],[1,numTime]);
-                        dataBlock = reshape(rawData, [1, length(targetNodeIndices), numTime]);
+                        dataBlock = reshape(rawData, [1, 1, numTime]);
                     else
                         dataBlock = ncread(varFile, var, [1, targetNodeIndices(numNodes), 1],[numLayers,1,numTime]);
                     end
