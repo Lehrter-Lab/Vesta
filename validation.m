@@ -71,25 +71,22 @@ for j = 1:length(list)
             if contains(filename, 'temperature')
                 t = tRaw(tRaw.vgrid_layer == 32, :);  % Filter for top layer
                 time = baseTime + seconds(t.time);
-                time = datetime(time,'TimeZone','America/New_York');
                 out  = table2timetable(t,'RowTimes',time);
                 mTemp.(char(siteName)) = out(:,4);
             elseif contains(filename, 'salinity')
                 t = tRaw(tRaw.vgrid_layer == 32, :);  % Filter for top layer
                 time = baseTime + seconds(t.time);
-                time = datetime(time,'TimeZone','America/New_York');
                 out  = table2timetable(t,'RowTimes',time);
                 mSal.(char(siteName)) = out(:,4);
             elseif contains(filename, 'elevation')
                 t = tRaw(tRaw.vgrid_layer == 1, :);
                 time = baseTime + seconds(t.time);
-                time = datetime(time,'TimeZone','America/New_York');
                 out  = table2timetable(t,'RowTimes',time);
                 mElev.(char(siteName)) = out(:,4);
             end
         elseif contains(filename, 'NOAA') % MSL
             t    = readmatrix(filename);
-            time = datetime(t(:,1), t(:,2), t(:,3), t(:,4), t(:,5), t(:,6),'TimeZone','America/New_York');
+            time = datetime(t(:,1), t(:,2), t(:,3), t(:,4), t(:,5), t(:,6),'TimeZone','UTC');
             out  = timetable(time,t(:,7));
             if contains(filename, 'temperature')
                 out = renamevars(out,'Var1','temperature');
@@ -107,15 +104,14 @@ pairSal  = caller(vSal, mSal);
 pairElev = caller(vElev,mElev);
 %% Get elevation bias
 bias = elevBias(pairElev);
-biasCorrection = bias.Montauk;
-%% Plot
-plotTileComparison(pairTemp,'Temperature','°C', [t1 t2],biasCorrection,saveDir);
-plotTileComparison(pairSal, 'Salinity',   'PSU',[t1 t2],biasCorrection,saveDir);
-plotTileComparison(pairElev,'Elevation',  'm',  [t1 t2],biasCorrection,saveDir);
 %% Kling-Gupta
 KGE_Temp = klinggupta(pairTemp);
 KGE_Sal  = klinggupta(pairSal);
-KGE_Elev = klinggupta(pairElev);
+KGE_Elev = klinggupta(pairElev,bias);
+%% Plot
+plotTileComparison(pairTemp,'Temperature','°C', [t1 t2],bias,saveDir,KGE_Temp);
+plotTileComparison(pairSal, 'Salinity',   'PSU',[t1 t2],bias,saveDir,KGE_Sal);
+plotTileComparison(pairElev,'Elevation',  'm',  [t1 t2],bias,saveDir,KGE_Elev);
 %% Sanity
 clearvars -except pair* bias* KGE*
 %% Master Func
@@ -129,7 +125,7 @@ function pairTable = caller(vStruct,mStruct)
     end
     Validation = renamevars(Validation,Validation.Properties.VariableNames,sites);
     Model      = renamevars(Model,Model.Properties.VariableNames,sites);
-    pairTable  = synchronize(Validation,Model,"union",'fillwithmissing');
+    pairTable  = synchronize(Validation,Model,"intersect",'fillwithmissing');
 end
 %% Bias Function
 function biasTable = elevBias(pairElev)
@@ -139,11 +135,40 @@ columns = pairElev.Properties.VariableNames;
         site = extractBefore(columns{i},"_");
         mData = pairElev.(columns{ia});
         vData = pairElev.(columns{i});
-        biasTable.(site) = mean(mData,"omitnan")-mean(vData,"omitnan");
+        biasTable.(site) = mean(mData-vData,"omitnan");
+    end
+end
+%% Kling-Gupta
+function output = klinggupta(pairTable,bias)
+    output = table('RowNames',{'KGE','r','alpha','beta'});
+    columns = pairTable.Properties.VariableNames;
+    for i = 1:(width(pairTable)/2)
+        ia   = i+(width(pairTable)/2);
+        site = extractBefore(columns{i},"_");
+        if nargin > 1
+            model = pairTable{:,ia}-bias.(site);
+        else
+            model = pairTable{:,ia};
+        end
+        validation = pairTable{:,i};
+        mStd  = std(model,"omitnan");
+        vStd  = std(validation,"omitnan");
+        mMean = mean(model,"omitnan");
+        vMean = mean(validation,"omitnan");
+        corr  = corrcoef([model,validation],'rows','pairwise'); 
+        corr  = corr(1,2);
+        pred  = mStd/vStd;   % variability of prediction errors
+        biasND  = mMean/vMean; % bias
+        klinggupta = 1-sqrt(((corr-1)^2) + ((pred-1)^2) + ((biasND-1)^2));
+        % Save in site specific structs
+        output.(site)(1) = klinggupta;
+        output.(site)(2) = corr;
+        output.(site)(3) = pred;
+        output.(site)(4) = biasND;
     end
 end
 %% Plot function
-function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, saveDir)
+function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, saveDir, KGE)
     fig = figure('Name', variableLabel + " Comparison", 'Position', [100, 100, 1200, 600]);
     tiledlayout('flow');
     columns = pairTable.Properties.VariableNames;
@@ -158,20 +183,22 @@ function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, s
         scatter(pairTable,time,i, ...
             'filled','MarkerFaceColor','blue','SizeData',sz,'DisplayName', 'Validation');
         hold on
-        if contains(variableLabel,'Elevation') && ~contains(site,"Montauk")
-            pairTable{:,ia} = pairTable{:,ia}-bias;
-            mask = isfinite(pairTable{:,ia});
-            plot(pairTable.(time)(mask), pairTable{mask,ia}, ...
+        if contains(variableLabel,'Elevation')
+            pairTable{:,ia} = pairTable{:,ia}-bias.(site);
+            plot(pairTable.(time), pairTable{:,ia}, ...
                 'Color',color,'LineWidth',lw,'DisplayName','Model');
+            hold on
+            plot(pairTable.(time), 0.*pairTable{:,ia},'k--');
         else
-            mask = isfinite(pairTable{:,ia});
-            plot(pairTable.(time)(mask), pairTable{mask,ia}, ...
+            plot(pairTable.(time), pairTable{:,ia}, ...
                 'Color',color,'LineWidth',lw,'DisplayName','Model');
         end
         title(site + " " + variableLabel);
+        txt = sprintf("KGE: %.3f, r: %.3f",KGE.(site)(1),KGE.(site)(2));
+        subtitle(txt,'FontSize',9);
         xlabel("Time");
         ylabel(yLabel);
-        legend('Location', 'best');
+        legend('Validation','Model','Location', 'best');
         grid on;
         if ~isempty(timeRange)
             xlim(timeRange);
@@ -184,29 +211,4 @@ function plotTileComparison(pairTable, variableLabel, yLabel, timeRange, bias, s
     %exportgraphics(fig, filename, 'ContentType', 'vector');
     filename = fullfile(saveDir, "Comparison_"+variableLabel+".fig");
     savefig(fig,filename);
-end
-%% Kling-Gupta
-function output = klinggupta(pairTable)
-    output = table('RowNames',{'KGE','r','alpha','beta'});
-    columns = pairTable.Properties.VariableNames;
-    for i = 1:(width(pairTable)/2)
-        ia   = i+(width(pairTable)/2);
-        site = extractBefore(columns{i},"_");
-        model      = pairTable{:,ia};
-        validation = pairTable{:,i};
-        mStd  = std(model,"omitnan");
-        vStd  = std(validation,"omitnan");
-        mMean = mean(model,"omitnan");
-        vMean = mean(validation,"omitnan");
-        corr  = corrcoef([model,validation],'rows','pairwise'); 
-        corr  = corr(1,2);
-        pred  = mStd/vStd;   % variability of prediction errors
-        bias  = mMean/vMean; % bias
-        klinggupta = 1-sqrt(((corr-1)^2) + ((pred-1)^2) + ((bias-1)^2));
-        % Save in site specific structs
-        output.(site)(1) = klinggupta;
-        output.(site)(2) = corr;
-        output.(site)(3) = pred;
-        output.(site)(4) = bias;
-    end
 end
