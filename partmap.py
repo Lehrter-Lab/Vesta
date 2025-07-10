@@ -64,9 +64,14 @@ def prepare_data(lons, lats, times, ids, bbox):
     
     # Time until particle first leaves domain (seconds)
     df_res = df_geo.sort_values('time').groupby('id', group_keys=False).apply(
-        lambda g: pd.Series({'residence_time': g.loc[~g.inside, 'time'].min()
-                             if (~g.inside).any() else g.time.max()}),
+        lambda g: pd.Series({'residence_time': 
+                             g.loc[~g.inside, 'time'].min()
+                             if (~g.inside).any() 
+                             else g.time.max()}),
         include_groups=False).reset_index()
+    df_res['first_time'] = df_geo.groupby('id')['time'].transform('min')
+    df_res['residence_time'] = df_res['residence_time'] - df_res['first_time']
+    df_res = df_res.drop(columns='first_time')
     
     # Total time particle spends inside domain (seconds)
     df_exp = df_geo[df_geo.inside].groupby('id')['time'].unique().apply(
