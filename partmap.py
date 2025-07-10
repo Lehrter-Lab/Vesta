@@ -1,6 +1,9 @@
+# CMikolaitis @ USA/DISL
+
 import numpy as np
 import pandas as pd
 import geopandas as gpd
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 from scipy.stats import binned_statistic_2d
 import contextily as ctx
@@ -151,13 +154,21 @@ def plot_paths_heatmap(lons, lats, times, ids, bbox):
     stat, x_proj, y_proj = bin_and_project(df_bins, bbox, 'dt_sum', bins=[lon_bins, lat_bins])
     # Convert seconds to days
     stat_days = stat / 86400
-
+    # Match figure box to project extent
+    x_min, x_max = x_proj.min(), x_proj.max()
+    y_min, y_max = y_proj.min(), y_proj.max()
+    # Get confidence interval
+    lo, hi = np.nanpercentile(stat_days, [0.5, 99.5])
+    norm   = mpl.colors.Normalize(vmin=lo, vmax=hi, clip=True)
+    # Actually plot
     fig, ax = plt.subplots(figsize=(10, 10))
-    im      = ax.pcolormesh(x_proj, y_proj, stat_days.T, cmap=cmap)
+    im      = ax.pcolormesh(x_proj, y_proj, stat_days.T, cmap=cmap, norm=norm)
     bbox.to_crs(epsg=3857).boundary.plot(ax=ax, edgecolor=domain_ec, linewidth=domain_lw)
-    ctx.add_basemap(ax, crs='EPSG:3857', source=basemap_source)
+    ctx.add_basemap(ax, crs='EPSG:3857', source=basemap_source, reset_extent=False)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+    # Titles and ticks
     ax.set_title("Time spent per grid cell (days)")
-
     xticks       = ax.get_xticks()
     yticks       = ax.get_yticks()
     lon_ticks, _ = projector.transform(xticks, np.zeros_like(xticks))
