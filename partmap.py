@@ -135,7 +135,7 @@ def plot_heatmaps(stat_res, stat_exp, x, y, bbox):
     plt.show()
 
 # Plot heatmap of time spent per cell for all paths (residence) with lat/lon tick labels
-def plot_paths_heatmap(lons, lats, times, ids, bbox):
+def plot_paths_heatmap(lons, lats, times, ids, bbox, log=False):
     df_all = pd.DataFrame({'id': ids, 'lon': lons, 'lat': lats, 'time': times})
     df_all = df_all.sort_values(['id', 'time'])
     df_all['dt'] = df_all.groupby('id')['time'].diff().fillna(0)
@@ -162,18 +162,27 @@ def plot_paths_heatmap(lons, lats, times, ids, bbox):
     # Match figure box to project extent
     x_min, x_max = x_proj.min(), x_proj.max()
     y_min, y_max = y_proj.min(), y_proj.max()
-    # Get confidence interval
+    # How to color scale
     lo, hi = np.nanpercentile(stat_days, [0.5, 99.5])
-    norm   = mpl.colors.Normalize(vmin=lo, vmax=hi, clip=True)
+    if log:
+        positive   = stat_days[stat_days > 0]
+        norm       = mpl.colors.LogNorm(vmin=positive.min(), vmax=positive.max(), clip=True)
+        cbar_label = "Time per grid cell (days, log scale)"
+        title      = "Time spent per grid cell (days, log scale)"
+    else:
+        norm       = mpl.colors.Normalize(vmin=lo, vmax=hi, clip=True)
+        cbar_label = "Time spent per grid cell (days)"
+        title      = "Time spent per grid cell (days)"
     # Actually plot
     fig, ax = plt.subplots(figsize=(10, 10))
     im      = ax.pcolormesh(x_proj, y_proj, stat_days.T, cmap=cmap, norm=norm)
+    # Bounding box and basemap
     bbox.to_crs(epsg=3857).boundary.plot(ax=ax, edgecolor=domain_ec, linewidth=domain_lw)
     ctx.add_basemap(ax, crs='EPSG:3857', source=basemap_source, reset_extent=False)
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
     # Titles and ticks
-    ax.set_title("Time spent per grid cell (days)")
+    ax.set_title(title)
     xticks       = ax.get_xticks()
     yticks       = ax.get_yticks()
     lon_ticks, _ = projector.transform(xticks, np.zeros_like(xticks))
@@ -198,4 +207,4 @@ stat_exp, _, _           = bin_and_project(df_exp, bbox, 'exposure_time', res=gr
 bbox_proj                = bbox.to_crs(epsg=3857)
 
 plot_heatmaps(stat_res, stat_exp, x_proj, y_proj, bbox_proj)
-plot_paths_heatmap(lons, lats, times, ids, bbox)
+plot_paths_heatmap(lons, lats, times, ids, bbox,True)
