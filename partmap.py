@@ -36,44 +36,45 @@ projector = pyproj.Transformer.from_crs("EPSG:3857", "EPSG:4326", always_xy=True
 
 # Read particle.pth format
 def read_particles(filename):
-    with open(filename) as f:
-        lines = f.readlines()
     times, lons, lats, ids = [], [], [], []
-    i = 0
-    while i < len(lines):
-        parts = lines[i].strip().split()
-        if len(parts) == 2:
-            t, n = float(parts[0]), int(parts[1])
-            for j in range(n):
-                pid, lon, lat = lines[i + 1 + j].strip().split()[:3]
-                times.append(t)
-                ids.append(int(pid))
-                lons.append(float(lon))
-                lats.append(float(lat))
-            i += n + 1
-        else:
-            i += 1
+    with open(filename) as f:
+        while True:
+            line = f.readline()
+            if not line:
+                break
+            parts = line.strip().split()
+            if len(parts) == 2:
+                t, n = float(parts[0]), int(parts[1])
+                for _ in range(n):
+                    pid, lon, lat = f.readline().strip().split()[:3]
+                    times.append(t)
+                    ids.append(int(pid))
+                    lons.append(float(lon))
+                    lats.append(float(lat))
     return np.array(lons), np.array(lats), np.array(times), np.array(ids)
 
 # Prepare residence and exposure times combined in one GeoDataFrame
-def prepare_data(lons, lats, times, ids, bbox, skip_static=False):
+def prepare_data(lons, lats, times, ids, bbox, skip_static=True):
     df_raw = pd.DataFrame({'id': ids, 'lon': lons, 'lat': lats, 'time': times})
     
     # If particle never moves, omit
     if skip_static:
         # Find particles with no movement (all lon and lat identical)
-        grouped = df_raw.groupby('id')
-        # Compute range of lon and lat per id
-        lon_range = grouped['lon'].transform(lambda x: x.max() - x.min())
-        lat_range = grouped['lat'].transform(lambda x: x.max() - x.min())
-        # Keep only moving particles
-        moving_mask = (lon_range > 0) | (lat_range > 0)
-        df_raw = df_raw[moving_mask].copy()
+        grouped = df_raw.groupby('id').agg({
+        'lon': ['min', 'max'],
+        'lat': ['min', 'max']
+        })
+        grouped.columns = ['lon_min', 'lon_max', 'lat_min', 'lat_max']
+        grouped['lon_range'] = grouped['lon_max'] - grouped['lon_min']
+        grouped['lat_range'] = grouped['lat_max'] - grouped['lat_min']
+        moving_ids = grouped[(grouped['lon_range'] > 1e-4) | (grouped['lat_range'] > 1e-4)].index
+        df_raw = df_raw[df_raw['id'].isin(moving_ids)]
         
+    df_raw['id'] = df_raw['id'].astype('category')
     # Convert to geometry 
-    geom = gpd.points_from_xy(df_raw.lon, df_raw.lat)
-    df_geo = gpd.GeoDataFrame(df_raw, geometry=geom, crs=bbox.crs)
-    domain_geom = bbox.union_all()
+    geom             = gpd.points_from_xy(df_raw.lon, df_raw.lat)
+    df_geo           = gpd.GeoDataFrame(df_raw, geometry=geom, crs=bbox.crs)
+    domain_geom      = bbox.union_all()
     df_geo['inside'] = df_geo.geometry.within(domain_geom)
     
     # Residence time calculation:
@@ -82,19 +83,19 @@ def prepare_data(lons, lats, times, ids, bbox, skip_static=False):
     # Get min time outside domain per id (NaN if no outside time)
     outside_times = (
         df_geo.loc[~df_geo['inside']]
-              .groupby('id')['time']
+              .groupby('id', observed=True)['time']
               .min()
               .rename('min_outside_time')
     )
     # Get max time inside domain per id
     inside_times = (
         df_geo.loc[df_geo['inside']]
-              .groupby('id')['time']
+              .groupby('id', observed=True)['time']
               .max()
               .rename('max_inside_time')
     )
     # Get first appearance time per id
-    first_times = df_geo.groupby('id')['time'].min().rename('first_time')
+    first_times = df_geo.groupby('id', observed=True)['time'].min().rename('first_time')
     # Combine into one DataFrame
     df_res = pd.DataFrame({
         'residence_time': outside_times.combine_first(inside_times),
@@ -111,13 +112,13 @@ def prepare_data(lons, lats, times, ids, bbox, skip_static=False):
         return np.sum(np.diff(sorted_t))
     exposure_times = (
         df_geo[df_geo['inside']]
-        .groupby('id')['time']
+        .groupby('id', observed=True)['time']
         .agg(lambda x: exposure_time(x.unique()))
         .rename('exposure_time')
         .reset_index()
     )
     # Injection site (first lon/lat per id)
-    df_rel = df_raw.groupby('id')[['lon', 'lat']].first().reset_index()
+    df_rel = df_raw.groupby('id', observed=True)[['lon', 'lat']].first().reset_index()
     
     # Merge all data
     df_out = df_res.merge(exposure_times, on='id', how='left')
@@ -133,14 +134,14 @@ def bin_and_project(df, bbox, value_col, res=None, method='mean', bins=None):
         minx, miny, maxx, maxy = bbox.total_bounds
         lon_bins = np.arange(minx, maxx + res, res)
         lat_bins = np.arange(miny, maxy + res, res)
-        bins = [lon_bins, lat_bins]
+        bins     = [lon_bins, lat_bins]
     stat, x_edges, y_edges, _ = binned_statistic_2d(
         df['lon'], df['lat'], df[value_col], statistic=method, bins=bins)
-    xs = (x_edges[:-1] + x_edges[1:]) / 2
-    ys = (y_edges[:-1] + y_edges[1:]) / 2
+    xs     = (x_edges[:-1] + x_edges[1:]) / 2
+    ys     = (y_edges[:-1] + y_edges[1:]) / 2
     xv, yv = np.meshgrid(xs, ys)
-    pts = gpd.GeoDataFrame(geometry=gpd.points_from_xy(xv.ravel(), yv.ravel()), crs=bbox.crs)
-    proj = pts.to_crs(epsg=3857)
+    pts    = gpd.GeoDataFrame(geometry=gpd.points_from_xy(xv.ravel(), yv.ravel()), crs=bbox.crs)
+    proj   = pts.to_crs(epsg=3857)
     return stat, proj.geometry.x.values.reshape(xv.shape), proj.geometry.y.values.reshape(yv.shape)
 
 # Plot residence + exposure heatmaps side-by-side
@@ -194,28 +195,28 @@ def plot_paths_heatmap(lons, lats, times, ids, bbox, log=False):
     )
     df_all = df_all[valid]
 
-    df_bins = df_all.groupby(['lon_bin', 'lat_bin'])['dt'].sum().reset_index(name='dt_sum')
-
+    df_particle_cell = df_all.groupby(['id', 'lon_bin', 'lat_bin'])['dt'].sum().reset_index()
+    df_bins = df_particle_cell.groupby(['lon_bin', 'lat_bin'])['dt'].mean().reset_index(name='dt_mean')
+    
     df_bins['lon'] = lon_bins[df_bins['lon_bin']] + grid_res / 2
     df_bins['lat'] = lat_bins[df_bins['lat_bin']] + grid_res / 2
 
-    stat, x_proj, y_proj = bin_and_project(df_bins, bbox, 'dt_sum', bins=[lon_bins, lat_bins])
+    stat, x_proj, y_proj = bin_and_project(df_bins, bbox, 'dt_mean', bins=[lon_bins, lat_bins])
 
     stat_days = stat / 86400
     x_min, x_max = x_proj.min(), x_proj.max()
     y_min, y_max = y_proj.min(), y_proj.max()
 
-    lo, hi = np.nanpercentile(stat_days, [0.5, 99.5])
-
     if log:
         positive = stat_days[stat_days > 0]
         norm = mpl.colors.LogNorm(vmin=positive.min(), vmax=positive.max(), clip=True)
-        cbar_label_local = "Time per grid cell (days, log scale)"
-        title = "Time spent per grid cell (days, log scale)"
+        cbar_label_local = "Mean time per grid cell (days, log scale)"
+        title = "Mean time spent per grid cell (days, log scale)"
     else:
+        lo, hi = np.nanpercentile(stat_days, [0.5, 99.5])
         norm = mpl.colors.Normalize(vmin=lo, vmax=hi, clip=True)
-        cbar_label_local = "Time spent per grid cell (days)"
-        title = "Time spent per grid cell (days)"
+        cbar_label_local = "Mean time spent per grid cell (days)"
+        title = "Mean time spent per grid cell (days)"
 
     fig, ax = plt.subplots(figsize=(10, 10))
     im = ax.pcolormesh(x_proj, y_proj, stat_days.T, cmap=cmap, norm=norm)
@@ -241,7 +242,7 @@ def plot_paths_heatmap(lons, lats, times, ids, bbox, log=False):
     
     fig.savefig(outtrack, dpi=dpi, bbox_inches='tight')
     plt.show()
-    
+    return stat_days
 ## Main run -------------------------------------------------------------------
 bbox                     = gpd.read_file(bboxfile)
 lons, lats, times, ids   = read_particles(infile)
@@ -251,4 +252,4 @@ stat_exp, _, _           = bin_and_project(df_times, bbox, 'exposure_time', res=
 bbox_proj                = bbox.to_crs(epsg=3857)
 # Plot
 plot_heatmaps(stat_res, stat_exp, x_proj, y_proj, bbox_proj)
-plot_paths_heatmap(lons, lats, times, ids, bbox, True)
+a = plot_paths_heatmap(lons, lats, times, ids, bbox, True)
