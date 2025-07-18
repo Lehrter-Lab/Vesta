@@ -64,11 +64,11 @@ def prepare_data(lons, lats, times, ids, bbox, skip_static=True):
         'lon': ['min', 'max'],
         'lat': ['min', 'max']
         })
-        grouped.columns = ['lon_min', 'lon_max', 'lat_min', 'lat_max']
+        grouped.columns      = ['lon_min', 'lon_max', 'lat_min', 'lat_max']
         grouped['lon_range'] = grouped['lon_max'] - grouped['lon_min']
         grouped['lat_range'] = grouped['lat_max'] - grouped['lat_min']
         moving_ids = grouped[(grouped['lon_range'] > 1e-4) | (grouped['lat_range'] > 1e-4)].index
-        df_raw = df_raw[df_raw['id'].isin(moving_ids)]
+        df_raw     = df_raw[df_raw['id'].isin(moving_ids)]
         
     df_raw['id'] = df_raw['id'].astype('category')
     # Convert to geometry 
@@ -209,14 +209,14 @@ def plot_paths_heatmap(lons, lats, times, ids, bbox, log=False):
 
     if log:
         positive = stat_days[stat_days > 0]
-        norm = mpl.colors.LogNorm(vmin=positive.min(), vmax=positive.max(), clip=True)
+        norm     = mpl.colors.LogNorm(vmin=positive.min(), vmax=positive.max(), clip=True)
         cbar_label_local = "Mean time per grid cell (days, log scale)"
-        title = "Mean time spent per grid cell (days, log scale)"
+        title            = "Mean time spent per grid cell (days, log scale)"
     else:
         lo, hi = np.nanpercentile(stat_days, [0.5, 99.5])
-        norm = mpl.colors.Normalize(vmin=lo, vmax=hi, clip=True)
+        norm   = mpl.colors.Normalize(vmin=lo, vmax=hi, clip=True)
         cbar_label_local = "Mean time spent per grid cell (days)"
-        title = "Mean time spent per grid cell (days)"
+        title            = "Mean time spent per grid cell (days)"
 
     fig, ax = plt.subplots(figsize=(10, 10))
     im = ax.pcolormesh(x_proj, y_proj, stat_days.T, cmap=cmap, norm=norm)
@@ -253,3 +253,5 @@ bbox_proj                = bbox.to_crs(epsg=3857)
 # Plot
 plot_heatmaps(stat_res, stat_exp, x_proj, y_proj, bbox_proj)
 a = plot_paths_heatmap(lons, lats, times, ids, bbox, True)
+print('Residence Time: ',df_times['residence_time'].mean()/86400,
+      '\nExposure Time:  ', df_times['exposure_time'].mean()/86400)
