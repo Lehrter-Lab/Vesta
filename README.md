@@ -2,7 +2,10 @@
 
 This repository contains backups of essential inputs for the Vesta model as well as scripts to handle mesh validation and model outputs.
 
-## Plotter
+## Extractnodes3
+Looks in the ./outputs folder for target model outputs then selects target nodes from these files and compiles them to a tsv for legibility.
+
+## Validation
 This is a script to take tsv and csv files from USGS, NOAA, and interpretted SCHISM outputs and plot them station by station for model validation.
 
 ## points_to_bp
