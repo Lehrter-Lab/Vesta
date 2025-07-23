@@ -2,6 +2,9 @@
 
 This repository contains backups of essential inputs for the Vesta model as well as scripts to handle mesh validation and model outputs.
 
+## mesh_cfl_calculator
+Imports mesh.2dm file and converts it to mesh.gr3 file. Then iterates over each element to calculate their respective Courant–Friedrichs–Lewy numbers, color-code and plot them over the mesh.
+
 ## Extractnodes3
 Looks in the ./outputs folder for target model outputs then selects target nodes from these files and compiles them to a tsv for legibility.
 
