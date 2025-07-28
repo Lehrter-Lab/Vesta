@@ -7,6 +7,7 @@ from shapely.geometry import Point, box
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import contextily as ctx
+from pyproj import Geod
 
 # --- Config ---
 path_nc     = "particle.nc"
@@ -94,6 +95,26 @@ def compute_local(df, grid_size_deg=0.005, target_crs="EPSG:4326"):
     gdf = gpd.GeoDataFrame(grouped, geometry='geometry', crs="EPSG:4326")
     gdf = gdf.to_crs(target_crs)
     return gdf
+
+def compute_mean_distance_per_day(df):
+    geod       = Geod(ellps="WGS84")
+    df_sorted  = df.sort_values(by=["pid", "time"]).copy()
+    df_sorted["lon_prev"] = df_sorted.groupby("pid")["longitude"].shift()
+    df_sorted["lat_prev"] = df_sorted.groupby("pid")["latitude"].shift()
+    mask_valid = df_sorted["lon_prev"].notna()
+    df_valid   = df_sorted[mask_valid].copy()
+
+    _, _, distances = geod.inv(
+        df_valid["lon_prev"].values,
+        df_valid["lat_prev"].values,
+        df_valid["longitude"].values,
+        df_valid["latitude"].values)
+    df_valid["dxy"]  = distances
+    total_distance_m = df_valid.groupby("pid")["dxy"].sum()
+    duration_s       = df_sorted.groupby("pid")["time"].agg(lambda x: x.max() - x.min())
+    duration_days    = duration_s / 86400
+    mean_km_per_day  = (total_distance_m / 1000) / duration_days
+    return pd.DataFrame({"mean_km_per_day": mean_km_per_day})
 
 def plot_heatmap(gdf, value_col, title, output_path, crs="EPSG:3857", 
                  cmap="viridis_r", log_scale=True, colorbar_label=None, units=3600):
@@ -208,6 +229,9 @@ def main():
     print(f"Average exposure time: {times_arr['exp_time'].mean()/86400:.2f} days")
     # Merge exposure times back for binning and plotting
     df  = df.merge(times_arr[['res_time', 'exp_time']], left_on='pid', right_index=True, how='left')
+    # Compute daily particle transit
+    df_speed = compute_mean_distance_per_day(df)
+    print(f"Average travel speed: {df_speed['mean_km_per_day'].mean():.2f} km/day")
     # Compute local exposure and plot
     gdf = compute_local(df, grid_size_deg=0.005)
     plot_heatmap(gdf, value_col='mean_exp_time', output_path=output_exp,
@@ -215,6 +239,21 @@ def main():
     # Compute local water age and plot
     plot_heatmap(gdf, value_col='mean_water_age', output_path=output_age,
                    title="Local Water Age (days)", log_scale=False, units=86400)
-
+    # Save centroids
+    # Project to EPSG:5070 to compute accurate centroids
+    gdf_proj       = gdf.to_crs("EPSG:5070")
+    centroids_proj = gdf_proj.geometry.centroid
+    # Convert centroids back to EPSG:4326
+    centroids_geo = gpd.GeoSeries(centroids_proj, crs="EPSG:5070").to_crs("EPSG:4326")
+    # Create a GeoDataFrame of centroids with original attributes
+    gdf_centroids = gpd.GeoDataFrame(gdf.copy(), geometry=centroids_geo, crs="EPSG:4326")
+    # Mask: keep only centroids inside the domain polygon
+    mask_inside = gdf_centroids.geometry.within(domain_geom)
+    gdf_masked  = gdf_centroids[mask_inside].copy()
+    # Extract x/y and save to CSV
+    gdf_masked["x"] = gdf_masked.geometry.x
+    gdf_masked["y"] = gdf_masked.geometry.y
+    gdf_masked[["x", "y"]].to_csv("grid_centers_xy.csv", index=False)
+    
 if __name__ == "__main__":
     main()
