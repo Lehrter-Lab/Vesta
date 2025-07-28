@@ -5,7 +5,7 @@ import os
 
 ## Input params ---------------------------------------------------------------
 # Files
-infile      = "Residence_1.h5"
+infile      = "olivine.h5"
 output_file = "particles_new.bp"
 # Times
 start_time     = 2592000     # start in seconds per model record
@@ -45,18 +45,27 @@ def read_points(infile):
 
     elif ext == ".h5":
         with h5py.File(infile, 'r') as f:
-            node_path = "2DScatterModule/Residence/Nodes/NodeLocs"
-            z_path    = "2DScatterModule/Residence/Datasets/Z/Values"
+            node_path = None
+            z_path = None
 
-            if node_path not in f or z_path not in f:
+            def find_datasets(name, obj):
+                nonlocal node_path, z_path
+                if isinstance(obj, h5py.Dataset):
+                    if name.endswith("Nodes/NodeLocs"):
+                        node_path = name
+                    elif name.endswith("Datasets/Z/Values"):
+                        z_path = name
+
+            f.visititems(find_datasets)
+
+            if node_path is None or z_path is None:
                 raise KeyError("Required dataset(s) not found in input file.")
 
-            coords = f[node_path][:]           # shape (N, 3)
-            zs     = f[z_path][0, :]           # shape (1, N) → flatten to (N,)
-
+            coords = f[node_path][:]  # shape (N, 3)
             xs = coords[:, 0]
             ys = coords[:, 1]
-
+            zs = f[z_path][0, :]  # shape (1, N) → flatten to (N,)
+            
             if len(zs) != len(xs):
                 raise ValueError("Mismatch between number of coordinate points and z-values.")
 
@@ -65,7 +74,7 @@ def read_points(infile):
         raise ValueError(f"Unsupported input file format: {ext}")
         
 # Generate properly formatted particle.bp block
-def generate_particle_file(xs, ys, times, depths, output_file,
+def generate_particle_file(xs, ys, zs, times, output_file,
                            dz=0.5,
                            nscreen=0,
                            mod_part=0,
@@ -127,4 +136,4 @@ def generate_particle_file(xs, ys, times, depths, output_file,
 
 ## Do the work ----------------------------------------------------------------
 xs, ys, zs = read_points(infile)
-generate_particle_file(xs, ys, times, depths, output_file)
+generate_particle_file(xs, ys, zs, times, output_file)
