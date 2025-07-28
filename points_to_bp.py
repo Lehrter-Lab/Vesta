@@ -2,16 +2,20 @@ import geopandas as gpd
 import numpy as np
 import h5py
 import os
+from datetime import datetime
 
 ## Input params ---------------------------------------------------------------
 # Files
-infile      = "olivine.h5"
-output_file = "particles_new.bp"
+infile      = "zip:peconic_gridpoints.zip"
+output_file = "fall.bp"
 # Times
-start_time     = 2592000     # start in seconds per model record
-time_interval  = 7200        # time between injections
-n_time_steps   = 24          # number of injections
-times          = [start_time + i * time_interval for i in range(n_time_steps)]
+model_start   = datetime(2020, 10, 1, 0, 0, 0)
+target_date   = datetime(2021, 9, 1, 0, 0, 0)
+dt            = target_date - model_start
+start_time    = int(dt.total_seconds()) # start in seconds per model record
+time_interval = 7200        # time between injections
+n_time_steps  = 24          # number of injections
+times         = [start_time + i * time_interval for i in range(n_time_steps)]
 # .bp params
 h0       = 0.01       # initial water depth (m)
 rnday    = 90.0       # total model run duration (days)
@@ -31,14 +35,14 @@ if abs(dtm * nspool - seconds_per_hour) > 1e-6:
 def read_points(infile):
     ext = os.path.splitext(infile)[1].lower()
 
-    if ext == ".shp":
+    if ext == ".shp" or ext == ".zip":
         gdf = gpd.read_file(infile)
         if not all(gdf.geometry.geom_type == 'Point'):
             raise ValueError("Shapefile must contain only Point geometries.")
         xs = gdf.geometry.x.tolist()
         ys = gdf.geometry.y.tolist()
-        if "elevation" in gdf.columns:
-            zs = gdf["elevation"].tolist()
+        if "SAMPLE_1" in gdf.columns:
+            zs = gdf["SAMPLE_1"].tolist()
         else:
             zs = [0.0] * len(xs)
         return xs, ys, zs
