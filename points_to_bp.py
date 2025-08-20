@@ -6,8 +6,8 @@ from datetime import datetime
 
 ## Input params ---------------------------------------------------------------
 # Files
-infile      = "zip:peconic_gridpoints.zip"
-output_file = "fall.bp"
+infile      = "residence_coarse.h5"
+output_file = "fallCoarse.bp"
 # Times
 model_start   = datetime(2020, 10, 1, 0, 0, 0)
 target_date   = datetime(2021, 9, 1, 0, 0, 0)
@@ -17,12 +17,12 @@ time_interval = 7200        # time between injections
 n_time_steps  = 24          # number of injections
 times         = [start_time + i * time_interval for i in range(n_time_steps)]
 # .bp params
-h0       = 0.01       # initial water depth (m)
-rnday    = 90.0       # total model run duration (days)
-dtm      = 50.0       # model timestep (seconds)
-nspool   = 72         # output frequency: number of model steps between outputs
-ihfskip  = 1728       # number of output steps to skip at start (spin-up)
-ndeltp   = 40         # internal particle time steps per model timestep
+h0       = 0.01         # initial water depth (m)
+rnday    = dt.days+90.0 # total model run duration (days)
+dtm      = 80.0         # model timestep (seconds)
+nspool   = 45           # output frequency: number of model steps between outputs
+ihfskip  = 1080         # number of output steps to skip at start (spin-up)
+ndeltp   = 80           # internal particle time steps per model timestep
 
 ## Param sanity check ---------------------------------------------------------
 seconds_per_hour = 3600
