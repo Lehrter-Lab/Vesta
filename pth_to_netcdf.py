@@ -1,31 +1,41 @@
 import numpy as np
-import xarray as xr
+from netCDF4 import Dataset
 
-def count_total_particles(filepath):
-    total = 0
-    with open(filepath) as f:
-        for line in f:
-            parts = line.strip().split()
-            if len(parts) != 2:
-                continue
-            try:
-                _ = float(parts[0])
-                n = int(parts[1])
-            except ValueError:
-                continue
-            total += n
-    return total
+def init_netcdf(outfile):
+    root = Dataset(outfile, "w", format="NETCDF4")
+    root.createDimension("point", None)  # unlimited
 
-def read_pth_with_depth(filepath):
-    total_points = count_total_particles(filepath)
-    x     = np.empty(total_points, dtype=np.float64)
-    y     = np.empty(total_points, dtype=np.float64)
-    t     = np.empty(total_points, dtype=np.float64)
-    pid   = np.empty(total_points, dtype=np.int32)
-    depth = np.empty(total_points, dtype=np.float32)
-    
-    with open(filepath) as f:
-        i = 0
+    root.createVariable("pid", "i4", ("point",), zlib=False)
+    root.createVariable("lon", "f4", ("point",), zlib=True, complevel=4)
+    root.createVariable("lat", "f4", ("point",), zlib=True, complevel=4)
+    root.createVariable("depth", "f4", ("point",), zlib=True, complevel=4)
+    root.createVariable("time", "f8", ("point",), zlib=True, complevel=4)
+
+    return root
+
+def append_chunk(root, buffer, start_index):
+    n     = len(buffer)
+    pid   = np.array([b[0] for b in buffer], dtype=np.int32)
+    x     = np.array([b[1] for b in buffer], dtype=np.float32)
+    y     = np.array([b[2] for b in buffer], dtype=np.float32)
+    depth = np.array([b[3] for b in buffer], dtype=np.float32)
+    t     = np.array([b[4] for b in buffer], dtype=np.float64)
+
+    end_index = start_index + n
+    root["pid"][start_index:end_index]   = pid
+    root["lon"][start_index:end_index]   = x
+    root["lat"][start_index:end_index]   = y
+    root["depth"][start_index:end_index] = depth
+    root["time"][start_index:end_index]  = t
+
+    return end_index
+
+def pth_to_netcdf(pth_file, output_nc, chunk_size=100000):
+    root = init_netcdf(output_nc)
+    buffer = []
+    i = 0
+
+    with open(pth_file) as f:
         while True:
             header = f.readline()
             if not header:
@@ -34,11 +44,10 @@ def read_pth_with_depth(filepath):
             if len(parts) != 2:
                 continue
             try:
-                time_sec    = float(parts[0])
-                n_particles = int(parts[1])
+                time_sec, n_particles = float(parts[0]), int(parts[1])
             except ValueError:
                 continue
-            
+
             for _ in range(n_particles):
                 line = f.readline()
                 if not line:
@@ -46,41 +55,25 @@ def read_pth_with_depth(filepath):
                 vals = line.strip().split()
                 if len(vals) < 4:
                     raise ValueError(f"Malformed particle line: {line}")
-                pid[i]   = int(vals[0])
-                x[i]     = float(vals[1])
-                y[i]     = float(vals[2])
-                depth[i] = float(vals[3])
-                t[i]     = time_sec
-                i += 1
-    
-    if i != total_points:
-        raise RuntimeError(f"Read {i} particles but expected {total_points}")
-    return pid, t, x, y, depth
 
-def write_to_netcdf(outfile, pid, t, x, y, depth):
-    ds = xr.Dataset(
-        {
-            "time": (["point"], t),
-            "pid": (["point"], pid),
-            "longitude": (["point"], x),
-            "latitude": (["point"], y),
-            "depth": (["point"], depth),
-        },
-        coords={"point": np.arange(len(pid))},
-        attrs={"description": "Raw particle tracking data from .pth file"},
-    )
-    comp     = dict(zlib=True, complevel=4)
-    encoding = {var: comp for var in ds.data_vars}
-    ds.to_netcdf(outfile, encoding=encoding)
-    print(f"Saved raw particle data to {outfile}")
+                buffer.append((int(vals[0]), float(vals[1]), float(vals[2]), float(vals[3]), time_sec))
 
-def main(pth_file, output_nc):
-    pid, t, x, y, depth = read_pth_with_depth(pth_file)
-    write_to_netcdf(output_nc, pid, t, x, y, depth)
+                if len(buffer) >= chunk_size:
+                    i = append_chunk(root, buffer, i)
+                    buffer = []
+
+        if buffer:
+            i = append_chunk(root, buffer, i)
+
+    root.close()
+    print(f"Finished writing {i} particles to {output_nc}")
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) != 3:
-        print("Usage: python pth_to_netcdf.py particle.pth output.nc")
+    if len(sys.argv) < 3:
+        print("Usage: python pth_to_netcdf.py particle.pth output.nc [chunk_size]")
         sys.exit(1)
-    main(sys.argv[1], sys.argv[2])
+    pth_file, output_nc = sys.argv[1], sys.argv[2]
+    # pth_file, output_nc = 'particle.pth', 'output.nc'
+    chunk_size = int(sys.argv[3]) if len(sys.argv) == 4 else 100000
+    pth_to_netcdf(pth_file, output_nc, chunk_size)
