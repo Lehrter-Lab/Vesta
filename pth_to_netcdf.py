@@ -4,12 +4,11 @@ from netCDF4 import Dataset
 def init_netcdf(outfile):
     root = Dataset(outfile, "w", format="NETCDF4")
     root.createDimension("point", None)  # unlimited
-
+    comp = dict(zlib=True, complevel=4, shuffle=True)
+    
     root.createVariable("pid", "i4", ("point",), zlib=False)
-    root.createVariable("lon", "f4", ("point",), zlib=True, complevel=4)
-    root.createVariable("lat", "f4", ("point",), zlib=True, complevel=4)
-    root.createVariable("depth", "f4", ("point",), zlib=True, complevel=4)
-    root.createVariable("time", "f8", ("point",), zlib=True, complevel=4)
+    for name in ["lon", "lat", "depth", "time"]:
+        root.createVariable(name, "f4", ("point",), **comp)
 
     return root
 
@@ -70,10 +69,10 @@ def pth_to_netcdf(pth_file, output_nc, chunk_size=100000):
 
 if __name__ == "__main__":
     import sys
-    if len(sys.argv) < 3:
-        print("Usage: python pth_to_netcdf.py particle.pth output.nc [chunk_size]")
-        sys.exit(1)
-    pth_file, output_nc = sys.argv[1], sys.argv[2]
-    # pth_file, output_nc = 'particle.pth', 'output.nc'
+    # if len(sys.argv) < 3:
+    #     print("Usage: python pth_to_netcdf.py particle.pth output.nc [chunk_size]")
+    #     sys.exit(1)
+    # pth_file, output_nc = sys.argv[1], sys.argv[2]
+    pth_file, output_nc = 'particle.pth', 'output.nc'
     chunk_size = int(sys.argv[3]) if len(sys.argv) == 4 else 100000
     pth_to_netcdf(pth_file, output_nc, chunk_size)
