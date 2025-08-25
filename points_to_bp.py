@@ -6,11 +6,11 @@ from datetime import datetime
 
 ## Input params ---------------------------------------------------------------
 # Files
-infile      = "residence_coarse.h5"
-output_file = "fallCoarse.bp"
+infile      = "peconic_gridpoints.zip"
+output_file = "winter.bp"
 # Times
 model_start   = datetime(2020, 10, 1, 0, 0, 0)
-target_date   = datetime(2021, 9, 1, 0, 0, 0)
+target_date   = datetime(2020, 12, 1, 0, 0, 0)
 dt            = target_date - model_start
 start_time    = int(dt.total_seconds()) # start in seconds per model record
 time_interval = 7200        # time between injections
@@ -23,7 +23,7 @@ dtm      = 80.0         # model timestep (seconds)
 nspool   = 45           # output frequency: number of model steps between outputs
 ihfskip  = 1080         # number of output steps to skip at start (spin-up)
 ndeltp   = 80           # internal particle time steps per model timestep
-
+time_params = f"{h0} {rnday} {dtm} {nspool} {ihfskip} {ndeltp}"
 ## Param sanity check ---------------------------------------------------------
 seconds_per_hour = 3600
 if abs(dtm * nspool - seconds_per_hour) > 1e-6:
@@ -87,7 +87,7 @@ def generate_particle_file(xs, ys, zs, times, output_file,
                            istiff=0,
                            ibnd_beh=0,
                            ics_block="2 -122.6 37.38 ics slam0 sfea0",
-                           time_params="0.01 90. 50. 72 1728 40"):
+                           time_params=time_params):
     if not (len(xs) == len(ys) == len(zs)):
         raise ValueError("Length mismatch among xs, ys, zs.")
     
