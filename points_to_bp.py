@@ -3,14 +3,15 @@ import numpy as np
 import h5py
 import os
 from datetime import datetime
+import pandas as pd
 
 ## Input params ---------------------------------------------------------------
 # Files
-infile      = "peconic_gridpoints.zip"
-output_file = "winter.bp"
+infile      = "grid_1500m.csv"
+output_file = "summer.bp"
 # Times
 model_start   = datetime(2020, 10, 1, 0, 0, 0)
-target_date   = datetime(2020, 12, 1, 0, 0, 0)
+target_date   = datetime(2021, 6, 1, 0, 0, 0)
 dt            = target_date - model_start
 start_time    = int(dt.total_seconds()) # start in seconds per model record
 time_interval = 7200        # time between injections
@@ -24,6 +25,7 @@ nspool   = 45           # output frequency: number of model steps between output
 ihfskip  = 1080         # number of output steps to skip at start (spin-up)
 ndeltp   = 80           # internal particle time steps per model timestep
 time_params = f"{h0} {rnday} {dtm} {nspool} {ihfskip} {ndeltp}"
+
 ## Param sanity check ---------------------------------------------------------
 seconds_per_hour = 3600
 if abs(dtm * nspool - seconds_per_hour) > 1e-6:
@@ -74,6 +76,16 @@ def read_points(infile):
                 raise ValueError("Mismatch between number of coordinate points and z-values.")
 
             return xs.tolist(), ys.tolist(), zs.tolist()
+        
+    elif ext == ".csv":
+        df = pd.read_csv(infile)
+        if not {"lon", "lat", "z"}.issubset(df.columns):
+            raise ValueError("CSV must contain 'lon', 'lat', and 'z' columns.")
+        xs = df["lon"].tolist()
+        ys = df["lat"].tolist()
+        zs = df["z"].tolist()
+        return xs, ys, zs
+    
     else:
         raise ValueError(f"Unsupported input file format: {ext}")
         
