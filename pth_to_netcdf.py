@@ -69,10 +69,11 @@ def pth_to_netcdf(pth_file, output_nc, chunk_size=100000):
 
 if __name__ == "__main__":
     import sys
-    # if len(sys.argv) < 3:
-    #     print("Usage: python pth_to_netcdf.py particle.pth output.nc [chunk_size]")
-    #     sys.exit(1)
-    # pth_file, output_nc = sys.argv[1], sys.argv[2]
-    pth_file, output_nc = 'particle.pth', 'output.nc'
+    if len(sys.argv) < 3:
+        print("Usage: python pth_to_netcdf.py particle.pth output.nc [chunk_size]")
+        sys.exit(1)
+    pth_file, output_nc = sys.argv[1], sys.argv[2]
+    #pth_file, output_nc = 'particle.pth', 'output.nc'
     chunk_size = int(sys.argv[3]) if len(sys.argv) == 4 else 100000
     pth_to_netcdf(pth_file, output_nc, chunk_size)
+
