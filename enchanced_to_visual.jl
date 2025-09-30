@@ -49,72 +49,79 @@ function compute_local(ncfile::String;
     thread_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
 
     # Pass 2: chunked processing (also uses @views)
-    chunk_indices = collect(1:chunk_size:N)
-    @threads for i in 1:length(chunk_indices)
-        tid = threadid()
-        local_dt = thread_dt[tid]
-        local_tw = thread_tw[tid]
-        local_np = thread_np[tid]
+	chunk_indices = collect(1:chunk_size:N)
+	for i in 1:length(chunk_indices)
+		start = chunk_indices[i]
+		stop  = min(start+chunk_size-1, N)
 
-        start = chunk_indices[i]
-        stop  = min(start+chunk_size-1, N)
+		# I/O
+		@views begin
+			pid_chunk  = ds["pid"][start:stop]
+			lon_chunk  = ds["lon"][start:stop]
+			lat_chunk  = ds["lat"][start:stop]
+			time_chunk = ds["time"][start:stop]
+		end
 
-        @views begin
-            pid_chunk  = ds["pid"][start:stop]
-            lon_chunk  = ds["lon"][start:stop]
-            lat_chunk  = ds["lat"][start:stop]
-            time_chunk = ds["time"][start:stop]
-        end
+		# Transform coords
+		coords = map(trans, lon_chunk, lat_chunk)
+		x_chunk = first.(coords)
+		y_chunk = last.(coords)
 
-        # Project coordinates for this chunk
-        coords = map(trans, lon_chunk, lat_chunk)
-        x_chunk = first.(coords)
-        y_chunk = last.(coords)
+		# Sort by pid
+		sorted_idx  = sortperm(pid_chunk)
+		pid_sorted  = pid_chunk[sorted_idx]
+		x_sorted    = x_chunk[sorted_idx]
+		y_sorted    = y_chunk[sorted_idx]
+		time_sorted = time_chunk[sorted_idx]
 
-        # Sort by pid within chunk (keeps your original approach)
-        sorted_idx  = sortperm(pid_chunk)
-        pid_sorted  = pid_chunk[sorted_idx]
-        x_sorted    = x_chunk[sorted_idx]
-        y_sorted    = y_chunk[sorted_idx]
-        time_sorted = time_chunk[sorted_idx]
+		# Find group boundaries (per-particle trajectory)
+		breaks = vcat(1,
+					  findall(diff(pid_sorted) .!= 0) .+ 1,
+					  length(pid_sorted)+1)
 
-        # Compute dt per-particle using views to avoid copies
-        dt = zeros(Float64, length(pid_sorted))
-        start_idx = 1
-        while start_idx <= length(pid_sorted)
-            end_idx = start_idx
-            while end_idx < length(pid_sorted) && pid_sorted[end_idx+1] == pid_sorted[start_idx]
-                end_idx += 1
-            end
-            v = view(time_sorted, start_idx:end_idx)              # view of times
-            view(dt, start_idx:end_idx) .= [0.0; diff(v)]         # write into dt via view
-            start_idx = end_idx + 1
-        end
+		# Parallel processing over groups
+		@threads for g in 1:length(breaks)-1
+			tid = threadid()
+			local_dt = thread_dt[tid]
+			local_tw = thread_tw[tid]
+			local_np = thread_np[tid]
 
-        # Keep only positive dt (use views)
-        valid_idx = findall(dt .> 0)
-        if !isempty(valid_idx)
-            pid_v  = view(pid_sorted, valid_idx)
-            x_v    = view(x_sorted, valid_idx)
-            y_v    = view(y_sorted, valid_idx)
-            dt_v   = view(dt, valid_idx)
-            time_v = view(time_sorted, valid_idx)
+			lo = breaks[g]
+			hi = breaks[g+1]-1
 
-            # Bin into equal-area grid (projected meters)
-            x_bin = clamp.(searchsortedfirst.(Ref(x_edges), x_v) .- 1, 1, n_x)
-            y_bin = clamp.(searchsortedfirst.(Ref(y_edges), y_v) .- 1, 1, n_y)
+			xs = view(x_sorted, lo:hi)
+			ys = view(y_sorted, lo:hi)
+			ts = view(time_sorted, lo:hi)
 
-            # Update per-thread accumulators (inbounds)
-            for j in eachindex(x_bin)
-                xi, yi = x_bin[j], y_bin[j]
-                @inbounds begin
-                    local_dt[xi, yi] += dt_v[j]
-                    local_tw[xi, yi] += dt_v[j] * time_v[j]
-                    local_np[xi, yi] += 1
-                end
-            end
-        end
-    end
+			if length(xs) > 1
+				dx = diff(xs)
+				dy = diff(ys)
+				dt = diff(ts)
+
+				# Keep only positive dt
+				good = dt .> 0
+				if any(good)
+					xs = xs[2:end][good]
+					ys = ys[2:end][good]
+					ts = ts[2:end][good]
+					dt = dt[good]
+
+					# Bin into equal-area grid
+					x_bin = clamp.(searchsortedfirst.(Ref(x_edges), xs) .- 1, 1, n_x)
+					y_bin = clamp.(searchsortedfirst.(Ref(y_edges), ys) .- 1, 1, n_y)
+
+					for j in eachindex(x_bin)
+						xi, yi = x_bin[j], y_bin[j]
+						@inbounds begin
+							local_dt[xi, yi] += dt[j]
+							local_tw[xi, yi] += dt[j] * ts[j]
+							local_np[xi, yi] += 1
+						end
+					end
+				end
+			end
+		end
+	end
 
     close(ds)
 
