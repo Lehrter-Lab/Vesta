@@ -7,7 +7,7 @@ function compute_local(ncfile::String;
     ds = NCDataset(ncfile, "r")
     N  = length(ds["pid"])
 
-    # Pass 1: determine domain bounds in target CRS (uses @views)
+    # Pass 1: determine domain bounds in target CRS
     min_lon, max_lon = Inf, -Inf
     min_lat, max_lat = Inf, -Inf
 
@@ -48,7 +48,7 @@ function compute_local(ncfile::String;
     thread_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
     thread_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
 
-    # Pass 2: chunked processing (also uses @views)
+    # Pass 2: chunked processing
 	chunk_indices = collect(1:chunk_size:N)
 	for i in 1:length(chunk_indices)
 		start = chunk_indices[i]
@@ -297,4 +297,5 @@ function main()
     println("All done.")
 end
 main()
+
 
