@@ -25,19 +25,21 @@ function compute_local(ncfile::String;
 		end
 	end
 	
-	# Project
-	trans = Proj.Transformation("EPSG:4326", target_crs; always_xy=true)
+	# Projection defs
+	trans_fwd = Proj.Transformation("EPSG:4326", target_crs; always_xy=true)
+	trans_inv = Proj.Transformation(target_crs, "EPSG:4326"; always_xy=true)
+	
+	# Project Bounding Box
 	corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
-	xs, ys = trans.(first.(corners), last.(corners))
-
+	xs, ys = trans_fwd.(first.(corners), last.(corners))
 	min_x, max_x = extrema(xs)
 	min_y, max_y = extrema(ys)
 
     # Build equal-area grid edges (meters in target_crs)
-    x_edges = min_x:grid_size:max_x
-    y_edges = min_y:grid_size:max_y
-    n_x, n_y = length(x_edges)-1, length(y_edges)-1
-
+    edges_x = min_x:grid_size:max_x
+    edges_y = min_y:grid_size:max_y
+    n_x, n_y = length(edges_x)-1, length(edges_y)-1
+	
     # Global accumulators + per-thread buffers
     dt_sum_cell        = zeros(Float64, n_x, n_y)
     time_weighted_cell = zeros(Float64, n_x, n_y)
@@ -62,10 +64,12 @@ function compute_local(ncfile::String;
 			time_chunk = ds["time"][start:stop]
 		end
 
-		# Transform coords
-		coords = map(trans, lon_chunk, lat_chunk)
-		x_chunk = first.(coords)
-		y_chunk = last.(coords)
+		# Transform coords to projected CRS (EPSG:5070)
+        x_chunk, y_chunk = trans_fwd((lon_chunk, lat_chunk))
+
+		# Drop old lon/lat
+        lon_chunk = nothing
+        lat_chunk = nothing
 
 		# Sort by pid
 		sorted_idx  = sortperm(pid_chunk)
@@ -74,13 +78,19 @@ function compute_local(ncfile::String;
 		y_sorted    = y_chunk[sorted_idx]
 		time_sorted = time_chunk[sorted_idx]
 
+		# Drop old chunk arrays
+        pid_chunk  = nothing
+        x_chunk    = nothing
+        y_chunk    = nothing
+        time_chunk = nothing
+
 		# Find group boundaries (per-particle trajectory)
 		breaks = vcat(1,
 					  findall(diff(pid_sorted) .!= 0) .+ 1,
 					  length(pid_sorted)+1)
 
 		# Parallel processing over groups
-		@threads for g in 1:length(breaks)-1
+		@threads for g in 1:length(breaks)-1 schedule=dynamic
 			tid = threadid()
 			local_dt = thread_dt[tid]
 			local_tw = thread_tw[tid]
@@ -94,33 +104,28 @@ function compute_local(ncfile::String;
 			ts = view(time_sorted, lo:hi)
 
 			if length(xs) > 1
-				dx = diff(xs)
-				dy = diff(ys)
-				dt = diff(ts)
-
-				# Keep only positive dt
-				good = dt .> 0
-				if any(good)
-					xs = xs[2:end][good]
-					ys = ys[2:end][good]
-					ts = ts[2:end][good]
-					dt = dt[good]
-
-					# Bin into equal-area grid
-					x_bin = clamp.(searchsortedfirst.(Ref(x_edges), xs) .- 1, 1, n_x)
-					y_bin = clamp.(searchsortedfirst.(Ref(y_edges), ys) .- 1, 1, n_y)
-
-					for j in eachindex(x_bin)
-						xi, yi = x_bin[j], y_bin[j]
+				x0, y0 = edges_x[1], edges_y[1]
+				# Loop manually instead of using diff() to avoid temporary allocations
+				for i in 2:length(xs)
+					dt_val = ts[i] - ts[i-1]
+					if dt_val > 0
+						x_bin = clamp(floor((xs[i] - x0) / grid_size) + 1, 1, n_x)
+						y_bin = clamp(floor((ys[i] - y0) / grid_size) + 1, 1, n_y)
 						@inbounds begin
-							local_dt[xi, yi] += dt[j]
-							local_tw[xi, yi] += dt[j] * ts[j]
-							local_np[xi, yi] += 1
+							local_dt[x_bin, y_bin] += dt_val
+							local_tw[x_bin, y_bin] += dt_val * ts[i]
+							local_np[x_bin, y_bin] += 1
 						end
 					end
 				end
 			end
 		end
+		
+		# Drop sorted arrays after processing chunk
+        pid_sorted  = nothing
+        x_sorted    = nothing
+        y_sorted    = nothing
+        time_sorted = nothing
 	end
 
     close(ds)
@@ -154,10 +159,10 @@ function compute_local(ncfile::String;
 
     # Create Rect geometries in target CRS (meters)
     df.geometry = [ Rect(
-                        x_edges[r.x_bin],
-                        y_edges[r.y_bin],
-                        x_edges[r.x_bin+1] - x_edges[r.x_bin],
-                        y_edges[r.y_bin+1] - y_edges[r.y_bin]
+                        edges_x[r.x_bin],
+                        edges_y[r.y_bin],
+                        edges_x[r.x_bin+1] - edges_x[r.x_bin],
+                        edges_y[r.y_bin+1] - edges_y[r.y_bin]
                     ) for r in eachrow(df) ]
 
     gdf = GeoDataFrames.GeoDataFrame(df, :geometry)
@@ -289,13 +294,6 @@ function main()
     println("Plotting heatmap...")
     plot_heatmap(gdf, :mean_exp_time, "Mean Exposure Time", "heatmap_exposure.png"; crs="EPSG:3857")
 
-    # Compute Monte Carlo mean particle speed ----------------------------
-    println("Estimating mean particle speed (Monte Carlo)...")
-    mean_speed_km_per_day = mean_speed(ncfile; N=sample_N, M=iterations_M, crs=crs_proj, chunk_size=chunk_size)
-    println("Approximate mean speed (km/day): ", mean_speed_km_per_day)
-
     println("All done.")
 end
 main()
-
-
