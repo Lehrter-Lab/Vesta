@@ -2,7 +2,7 @@ using DataFrames, GeoDataFrames, Statistics, ArchGDAL, GeometryBasics, Proj, Cai
 function compute_local(ncfile::String;
                        grid_size::Float64=5_000.0,       # bin size in meters
                        target_crs::String="EPSG:5070",
-                       chunk_size::Int=100_000)
+                       chunk_size::Int=1_000_000)
 
     ds = NCDataset(ncfile, "r")
     N  = length(ds["pid"])
@@ -279,7 +279,7 @@ function main()
     ncfile       = "particle_enhanced.nc"
     grid_size    = 5000.0       # meters
     crs_proj     = "EPSG:5070"  # equal-area projection
-    chunk_size   = 100000
+    chunk_size   = 1000000
     sample_N     = 10000        # particles per Monte Carlo iteration
     iterations_M = 50           # Monte Carlo iterations
 
@@ -299,4 +299,5 @@ function main()
     println("All done.")
 end
 main()
+
 
