@@ -31,7 +31,9 @@ function compute_local(ncfile::String;
 	
 	# Project Bounding Box
 	corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
-	xs, ys = trans_fwd.(first.(corners), last.(corners))
+	projected = trans_fwd.(first.(corners), last.(corners))
+	xs = first.(projected)
+	ys = last.(projected)
 	min_x, max_x = extrema(xs)
 	min_y, max_y = extrema(ys)
 
@@ -297,3 +299,4 @@ function main()
     println("All done.")
 end
 main()
+
