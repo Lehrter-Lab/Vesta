@@ -7,23 +7,49 @@ function compute_local(ncfile::String;
     ds = NCDataset(ncfile, "r")
     N  = length(ds["pid"])
 
-    # Pass 1: determine domain bounds in target CRS
-    min_lon, max_lon = Inf, -Inf
-    min_lat, max_lat = Inf, -Inf
+    ## Pass 1: determine domain bounds in target CRS
+    # Temp file for bounding box checkpoint
+    bbox_tmpfile = replace(ncfile, ".nc" => ".bbox.tmp")
 
-    for start in 1:chunk_size:N
-		stop = min(start+chunk_size-1, N)
-		lons = @views ds["lon"][start:stop]
-		lats = @views ds["lat"][start:stop]
+    if isfile(bbox_tmpfile)
+        println("Found bounding box checkpoint: $bbox_tmpfile")
+        bbox_data = readlines(bbox_tmpfile)
+        min_lon, max_lon = parse.(Float64, split(bbox_data[1]))
+        min_lat, max_lat = parse.(Float64, split(bbox_data[2]))
+        println("Loaded bounding box from checkpoint:")
+        println("  lon: [$min_lon, $max_lon], lat: [$min_lat, $max_lat]")
+    else
+        println("Computing domain bounding box from file...")
+        min_lon, max_lon = Inf, -Inf
+        min_lat, max_lat = Inf, -Inf
 
-		good = .!(isnan.(lons) .| isnan.(lats) .| (abs.(lons) .> 1e3) .| (abs.(lats) .> 1e3))
-		if any(good)
-			min_lon = min(min_lon, minimum(lons[good]))
-			max_lon = max(max_lon, maximum(lons[good]))
-			min_lat = min(min_lat, minimum(lats[good]))
-			max_lat = max(max_lat, maximum(lats[good]))
-		end
-	end
+        for start in 1:chunk_size:N
+            stop = min(start+chunk_size-1, N)
+            lons = @views ds["lon"][start:stop]
+            lats = @views ds["lat"][start:stop]
+
+            good = .!(isnan.(lons) .| isnan.(lats) .| (abs.(lons) .> 1e3) .| (abs.(lats) .> 1e3))
+            if any(good)
+                min_lon = min(min_lon, minimum(lons[good]))
+                max_lon = max(max_lon, maximum(lons[good]))
+                min_lat = min(min_lat, minimum(lats[good]))
+                max_lat = max(max_lat, maximum(lats[good]))
+            end
+        end
+
+        if !isfinite(min_lon) || !isfinite(min_lat)
+            close(ds)
+            error("No valid lon/lat values found in $ncfile")
+        end
+
+        # Write checkpoint file (two lines: lon range and lat range)
+        open(bbox_tmpfile, "w") do io
+            println(io, "$min_lon $max_lon")
+            println(io, "$min_lat $max_lat")
+			flush(io)
+        end
+        println("Saved bounding box checkpoint to $bbox_tmpfile")
+    end
 	
 	# Projection defs
 	trans_fwd = Proj.Transformation("EPSG:4326", target_crs; always_xy=true)
@@ -52,7 +78,7 @@ function compute_local(ncfile::String;
     thread_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
     thread_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
 
-    # Pass 2: chunked processing
+    ## Pass 2: chunked processing
 	chunk_indices = collect(1:chunk_size:N)
 	for i in 1:length(chunk_indices)
 		start = chunk_indices[i]
@@ -171,73 +197,19 @@ function compute_local(ncfile::String;
     GeoDataFrames.setcrs!(gdf, target_crs)   # already in target_crs
 
     output_path = replace(ncfile, ".nc" => ".gpkg")
-    GeoDataFrames.write(gdf, output_path)
-    println("Saved local exposure (equal-area) to GeoPackage: $output_path")
+    try
+		GeoDataFrames.write(gdf, output_path)
+		println("Saved local exposure (equal-area) to GeoPackage: $output_path")
 
-    return gdf
-end
-function mean_speed(ncfile::String; N::Int=10_000, M::Int=50, crs::String="EPSG:5070", chunk_size::Int=1_000_000)
-    # Open dataset
-    ds = NCDataset(ncfile, "r")
-    n_total = length(ds["pid"])
-
-    # Pass 1: Build pid → file indices mapping
-    println("Indexing particle IDs...")
-    pid_groups = Dict{Int, Vector{Int}}()
-    for start in 1:chunk_size:n_total
-        stop = min(start+chunk_size-1, n_total)
-        pids = ds["pid"][start:stop]
-        for (i, p) in enumerate(pids)
-            push!(get!(pid_groups, p, Int[]), start+i-1) # store global index
-        end
-    end
-    all_pids = collect(keys(pid_groups))
-    n_particles = length(all_pids)
-
-    # Projection
-    trans = Proj.Transformation("EPSG:4326", crs; always_xy=true)
-
-    # Function to compute mean speed for a set of pids
-    function mean_speed_sample(sample_pids)
-        mean_speeds = Float64[]
-        for pid_val in sample_pids
-            idxs = pid_groups[pid_val]
-            # Load lon/lat/time for just these indices
-            lon = ds["lon"][idxs]
-            lat = ds["lat"][idxs]
-            t   = ds["time"][idxs]
-
-            # Transform coords
-            coords = map(trans, lon, lat)
-            xs, ys = first.(coords), last.(coords)
-
-            # Sort by time
-            sort_idx = sortperm(t)
-            xs, ys, t = xs[sort_idx], ys[sort_idx], t[sort_idx]
-
-            if length(xs) > 1
-                dx = diff(xs)
-                dy = diff(ys)
-                dt = diff(t)
-                dist = sqrt.(dx.^2 .+ dy.^2)
-                dur  = (t[end] - t[1]) / 86400  # days
-                if dur > 0
-                    push!(mean_speeds, (sum(dist)/1000) / dur) # km/day
-                end
-            end
-        end
-        return isempty(mean_speeds) ? NaN : mean(mean_speeds)
-    end
-
-    # Pass 2: Monte Carlo iterations
-    println("Running Monte Carlo...")
-    mean_speed_results = ThreadsX.map(1:M) do _
-        sample_pids = rand(Random.default_rng(), all_pids, min(N, n_particles))
-        mean_speed_sample(sample_pids)
-    end
-
-    close(ds)
-    return mean(skipmissing(mean_speed_results))
+		# Cleanup only after success
+		if isfile(bbox_tmpfile)
+			rm(bbox_tmpfile; force=true)
+			println("Deleted bounding box checkpoint: $bbox_tmpfile")
+		end
+	catch err
+		@warn "Error saving GeoPackage; bounding box checkpoint retained for resume" exception=(err, catch_backtrace())
+	end
+	return gdf
 end
 function plot_heatmap(gdf, value_col::Symbol, title::String, output_path::String; crs="EPSG:3857", cmap=:viridis, log_scale=true, units=3600)
 	data = deepcopy(gdf)
