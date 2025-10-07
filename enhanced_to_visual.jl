@@ -67,7 +67,7 @@ function compute_local(ncfile::String;
 		end
 
 		# Transform coords to projected CRS (EPSG:5070)
-        x_chunk, y_chunk = trans_fwd((lon_chunk, lat_chunk))
+        x_chunk, y_chunk = trans_fwd.(lon_chunk, lat_chunk)
 
 		# Drop old lon/lat
         lon_chunk = nothing
@@ -299,5 +299,3 @@ function main()
     println("All done.")
 end
 main()
-
-
