@@ -57,9 +57,14 @@ function compute_local(ncfile::String;
 	
 	# Project Bounding Box
 	corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
-	projected = trans_fwd.(first.(corners), last.(corners))
-	xs = first.(projected)
-	ys = last.(projected)
+	proj_corners = trans_fwd.(first.(corners), last.(corners))
+	if isa(proj_corners, Tuple) && length(proj_corners) == 2 &&
+	   isa(proj_corners[1], AbstractArray) && isa(proj_corners[2], AbstractArray)
+	    xs, ys = proj_corners
+	else
+	    xs = first.(proj_corners)
+	    ys = last.(proj_corners)
+	end
 	min_x, max_x = extrema(xs)
 	min_y, max_y = extrema(ys)
 
@@ -93,7 +98,14 @@ function compute_local(ncfile::String;
 		end
 
 		# Transform coords to projected CRS (EPSG:5070)
-        x_chunk, y_chunk = trans_fwd.(lon_chunk, lat_chunk)
+        proj = trans_fwd.(lon_chunk, lat_chunk)
+		if isa(proj, Tuple) && length(proj) == 2 &&
+		   isa(proj[1], AbstractArray) && isa(proj[2], AbstractArray)
+		    x_chunk, y_chunk = proj
+		else
+		    x_chunk = first.(proj)
+		    y_chunk = last.(proj)
+		end
 
 		# Drop old lon/lat
         lon_chunk = nothing
@@ -271,3 +283,4 @@ function main()
     println("All done.")
 end
 main()
+
