@@ -146,17 +146,17 @@ function compute_local(ncfile::String;
 			if length(xs) > 1
 				x0, y0 = edges_x[1], edges_y[1]
 				# Loop manually instead of using diff() to avoid temporary allocations
-				for i in 2:length(xs)
-					dt_val = ts[i] - ts[i-1]
-					if dt_val > 0
-						x_bin = clamp(floor((xs[i] - x0) / grid_size) + 1, 1, n_x)
-						y_bin = clamp(floor((ys[i] - y0) / grid_size) + 1, 1, n_y)
-						@inbounds begin
-							local_dt[x_bin, y_bin] += dt_val
-							local_tw[x_bin, y_bin] += dt_val * ts[i]
-							local_np[x_bin, y_bin] += 1
-						end
-					end
+				for j in 2:length(xs)
+				    dt_val = ts[j] - ts[j-1]
+				    if dt_val > 0
+				        x_bin = clamp(Int(floor((xs[j] - x0) / grid_size)) + 1, 1, n_x)
+						y_bin = clamp(Int(floor((ys[j] - y0) / grid_size)) + 1, 1, n_y)
+				        @inbounds begin
+				            local_dt[x_bin, y_bin] += dt_val
+				            local_tw[x_bin, y_bin] += dt_val * ts[j]
+				            local_np[x_bin, y_bin] += 1
+				        end
+				    end
 				end
 			end
 		end
@@ -283,4 +283,5 @@ function main()
     println("All done.")
 end
 main()
+
 
