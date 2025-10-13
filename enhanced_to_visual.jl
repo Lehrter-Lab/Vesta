@@ -118,6 +118,9 @@ function compute_local(ncfile::String;
 		y_sorted    = y_chunk[sorted_idx]
 		time_sorted = time_chunk[sorted_idx]
 
+		# Sanity check
+		@assert length(x_sorted) == length(y_sorted) && length(x_sorted) == length(time_sorted) "sorted array length mismatch"
+		
 		# Drop old chunk arrays
         pid_chunk  = nothing
         x_chunk    = nothing
@@ -284,5 +287,6 @@ function main()
     println("All done.")
 end
 main()
+
 
 
