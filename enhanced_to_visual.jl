@@ -130,7 +130,7 @@ function compute_local(ncfile::String;
 					  length(pid_sorted)+1)
 
 		# Parallel processing over groups
-		@threads for g in 1:length(breaks)-1 schedule=dynamic
+		@threads for g in 1:length(breaks)-1
 			tid = threadid()
 			local_dt = thread_dt[tid]
 			local_tw = thread_tw[tid]
@@ -283,3 +283,4 @@ function main()
     println("All done.")
 end
 main()
+
