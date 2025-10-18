@@ -112,7 +112,7 @@ function compute_local(ncfile::String;
         lat_chunk = nothing
 
 		# Sort by pid
-		sorted_idx  = sortperm(pid_chunk)
+		sorted_idx  = ThreadsX.sortperm(pid_chunk)
 		pid_sorted  = pid_chunk[sorted_idx]
 		x_sorted    = x_chunk[sorted_idx]
 		y_sorted    = y_chunk[sorted_idx]
@@ -267,9 +267,7 @@ function main()
     ncfile       = "particle_enhanced.nc"
     grid_size    = 5000.0       # meters
     crs_proj     = "EPSG:5070"  # equal-area projection
-    chunk_size   = 1000000
-    sample_N     = 10000        # particles per Monte Carlo iteration
-    iterations_M = 50           # Monte Carlo iterations
+    chunk_size   = 10000000
 
     # Compute local exposure and water age --------------------------------
     println("Computing local exposure and water age...")
@@ -287,6 +285,7 @@ function main()
     println("All done.")
 end
 main()
+
 
 
 
