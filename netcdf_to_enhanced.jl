@@ -155,7 +155,7 @@ end
 function main()
     zip_shp     = "../../juliaParticle/bbox_dissolve.zip" # your shapefile zip
     extract_dir = "./shapefile_extracted"                 # temp folder for unzip
-    input_nc    = "./particleFall.nc"                     # input particle NetCDF
+    input_nc    = "./particle.nc"                         # input particle NetCDF
     enhanced_nc = "./particle_enhanced.nc"                # output NetCDF with 'inside' flag
     times_nc    = "./particle_times.nc"                   # output NetCDF with res/exp times
 
@@ -173,4 +173,5 @@ function main()
     println("Times NetCDF saved to $times_nc")
 end
 main()
+
 
