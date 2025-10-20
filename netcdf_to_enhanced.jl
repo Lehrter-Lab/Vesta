@@ -153,11 +153,11 @@ function compute_times_chunked(input_nc::String, output_nc::String; chunk_size::
     println("Residence and exposure times saved to $output_nc")
 end
 function main()
-    zip_shp     = "../../juliaParticle/bbox_dissolve.zip"      # your shapefile zip
-    extract_dir = "./shapefile_extracted"  # temp folder for unzip
-    input_nc    = "./particleFall.nc"           # input particle NetCDF
-    enhanced_nc = "./particle_enhanced.nc"  # output NetCDF with 'inside' flag
-    times_nc    = "./particle_times.nc"     # output NetCDF with res/exp times
+    zip_shp     = "../../juliaParticle/bbox_dissolve.zip" # your shapefile zip
+    extract_dir = "./shapefile_extracted"                 # temp folder for unzip
+    input_nc    = "./particleFall.nc"                     # input particle NetCDF
+    enhanced_nc = "./particle_enhanced.nc"                # output NetCDF with 'inside' flag
+    times_nc    = "./particle_times.nc"                   # output NetCDF with res/exp times
 
     shp_path = unzip_shapefile(zip_shp, extract_dir)
     println("Shapefile extracted to: $shp_path")
@@ -173,3 +173,4 @@ function main()
     println("Times NetCDF saved to $times_nc")
 end
 main()
+
