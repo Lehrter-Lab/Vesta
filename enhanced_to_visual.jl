@@ -54,6 +54,7 @@ function compute_local(ncfile::String;
 	# Projection defs
 	trans_fwd = Proj.Transformation("EPSG:4326", target_crs; always_xy=true)
 	trans_inv = Proj.Transformation(target_crs, "EPSG:4326"; always_xy=true)
+	println("Created transformations successfully.")
 	
 	# Project Bounding Box
 	corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
@@ -285,3 +286,4 @@ function main()
     println("All done.")
 end
 main()
+
