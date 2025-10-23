@@ -113,7 +113,7 @@ function compute_local(ncfile::String;
         lat_chunk = nothing
 
 		# Sort by pid
-		sorted_idx  = ThreadsX.sortperm(pid_chunk)
+		sorted_idx  = sortperm(pid_chunk)
 		pid_sorted  = pid_chunk[sorted_idx]
 		x_sorted    = x_chunk[sorted_idx]
 		y_sorted    = y_chunk[sorted_idx]
@@ -286,4 +286,5 @@ function main()
     println("All done.")
 end
 main()
+
 
