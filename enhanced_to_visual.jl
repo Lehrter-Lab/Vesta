@@ -210,7 +210,7 @@ function compute_local(ncfile::String;
                         edges_y[r.y_bin+1] - edges_y[r.y_bin]
                     ) for r in eachrow(df) ]
 
-    gdf = GeoDataFrames.GeoDataFrame(df, :geometry)
+    gdf = GeoDataFrames.GeoDataFrame(df, geometry=:geometry)
     GeoDataFrames.setcrs!(gdf, target_crs)   # already in target_crs
 
     output_path = replace(ncfile, ".nc" => ".gpkg")
@@ -286,5 +286,6 @@ function main()
     println("All done.")
 end
 main()
+
 
 
