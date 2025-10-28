@@ -1,6 +1,7 @@
 using DataFrames, CSV, Statistics, JSON3
 using ArchGDAL, GeometryBasics, GeoDataFrames, Proj, NCDatasets
 using CairoMakie, Colors, ThreadsX, Base.Threads
+using FilePathsBase
 
 # Compute and Save Tabular Results (CSV + Metadata)
 function compute_local_data(ncfile::String;
@@ -56,8 +57,7 @@ function compute_local_data(ncfile::String;
 
     # Projection Setup
     trans_fwd = Proj.Transformation("EPSG:4326", target_crs; always_xy=true)
-    corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
-    xs, ys = trans_fwd.(first.(corners), last.(corners))
+    xs, ys = trans_fwd.([min_lon, max_lon], [min_lat, max_lat])
     min_x, max_x = extrema(xs)
     min_y, max_y = extrema(ys)
 
@@ -181,17 +181,24 @@ function compute_local_data(ncfile::String;
 
     # Save Outputs
     csv_path = replace(ncfile, ".nc" => ".csv")
-    CSV.write(csv_path, df)
-    println("Saved results to $csv_path")
+    if isfile(csv_path)
+        println("CSV already exists. Skipping recomputation: $csv_path")
+    else
+        CSV.write(csv_path, df)
+        println("Saved results to $csv_path")
+    end
 
+    # Save compact metadata (change #2)
     meta_path = replace(ncfile, ".nc" => ".meta.json")
-    JSON3.write(meta_path, Dict(
+    meta = Dict(
         "grid_size" => grid_size,
         "target_crs" => target_crs,
-        "edges_x" => collect(edges_x),
-        "edges_y" => collect(edges_y)
-    ))
-    println("Saved metadata to $meta_path")
+        "bounds" => (min_x, max_x, min_y, max_y),
+        "n_x" => n_x,
+        "n_y" => n_y
+    )
+    JSON3.write(meta_path, meta)
+    println("Saved compact metadata to $meta_path")
 
     # Cleanup checkpoint after success
     try
@@ -211,9 +218,13 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPK
     df = CSV.read(csv_path, DataFrame)
     meta = JSON3.read(read(meta_path, String))
 
-    edges_x = meta["edges_x"]
-    edges_y = meta["edges_y"]
+    grid_size = meta["grid_size"]
+    (min_x, max_x, min_y, max_y) = meta["bounds"]
+    n_x, n_y = meta["n_x"], meta["n_y"]
     target_crs = meta["target_crs"]
+
+    edges_x = collect(min_x:grid_size:max_x)
+    edges_y = collect(min_y:grid_size:max_y)
 
     df.geometry = [
         GeometryBasics.Polygon(Point2f[
@@ -244,7 +255,8 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPK
 
         for r in eachrow(df)
             geom = ArchGDAL.creategeometry(r.geometry)
-            ArchGDAL.createfeature(layer, geom; Dict(Symbol(k)=>r[k] for k in names(df) if k != :geometry)...)
+            attrs = Dict(Symbol(k)=>r[k] for k in names(df) if k != :geometry)  # change #5
+            ArchGDAL.createfeature(layer, geom, attrs)
         end
     end
 
@@ -263,6 +275,10 @@ function plot_heatmap(gdf, value_col::Symbol, title::String, output_path::String
 
     if log_scale
         data = filter(row -> row[value_col] > 0, data)
+        if isempty(data)  # change #7
+            @warn "No valid data for plotting $value_col"
+            return nothing
+        end
         vmin, vmax = extrema(data[!, value_col])
         norm_fn = log10
     else
@@ -289,17 +305,24 @@ function plot_heatmap(gdf, value_col::Symbol, title::String, output_path::String
 end
 
 # Main
-function main()
+function main(; resume=false)
     ncfile = "particle_enhanced.nc"
     grid_size = 5000.0
     crs_proj = "EPSG:5070"
     chunk_size = 10_000_000
 
-    println("Computing local exposure and water age...")
-    compute_local_data(ncfile; grid_size=grid_size, target_crs=crs_proj, chunk_size=chunk_size)
+    csv_path = replace(ncfile, ".nc" => ".csv")
+    meta_path = replace(ncfile, ".nc" => ".meta.json")
+
+    if resume && isfile(csv_path) && isfile(meta_path)
+        println("Resuming from existing CSV and metadata.")
+    else
+        println("Computing local exposure and water age...")
+        compute_local_data(ncfile; grid_size=grid_size, target_crs=crs_proj, chunk_size=chunk_size)
+    end
 
     println("Building geospatial file...")
-    gdf = export_geospatial("particle_enhanced.csv", "particle_enhanced.meta.json"; fmt="GPKG")
+    gdf = export_geospatial(csv_path, meta_path; fmt="GPKG")
 
     println("Plotting heatmap...")
     plot_heatmap(gdf, :mean_exp_time, "Mean Exposure Time", "heatmap_exposure.png"; crs="EPSG:3857")
