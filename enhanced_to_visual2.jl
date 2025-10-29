@@ -46,7 +46,6 @@ function compute_local_data(ncfile::String;
             error("No valid lon/lat values found in $ncfile")
         end
 
-        # Save checkpoint file
         open(bbox_tmpfile, "w") do io
             println(io, "$min_lon $max_lon")
             println(io, "$min_lat $max_lat")
@@ -57,7 +56,19 @@ function compute_local_data(ncfile::String;
 
     # Projection Setup
     trans_fwd = Proj.Transformation("EPSG:4326", target_crs; always_xy=true)
-    xs, ys = trans_fwd.([min_lon, max_lon], [min_lat, max_lat])
+    trans_inv = Proj.Transformation(target_crs, "EPSG:4326"; always_xy=true)
+    println("Created transformations successfully.")
+
+    # Project Bounding Box
+    corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
+    proj_corners = trans_fwd.(first.(corners), last.(corners))
+    if isa(proj_corners, Tuple) && length(proj_corners) == 2 &&
+       isa(proj_corners[1], AbstractArray) && isa(proj_corners[2], AbstractArray)
+        xs, ys = proj_corners
+    else
+        xs = first.(proj_corners)
+        ys = last.(proj_corners)
+    end
     min_x, max_x = extrema(xs)
     min_y, max_y = extrema(ys)
 
@@ -83,7 +94,6 @@ function compute_local_data(ncfile::String;
         start = chunk_indices[i]
         stop  = min(start+chunk_size-1, N)
 
-        # Read chunk
         @views begin
             pid_chunk  = ds["pid"][start:stop]
             lon_chunk  = ds["lon"][start:stop]
@@ -91,11 +101,16 @@ function compute_local_data(ncfile::String;
             time_chunk = ds["time"][start:stop]
         end
 
-        # Transform coordinates
-        proj = trans_fwd.(lon_chunk, lat_chunk)
-        x_chunk, y_chunk = proj
+        # Transform coordinates (robust version)
+        proj_result = trans_fwd.(lon_chunk, lat_chunk)
+        if isa(proj_result, Tuple) && length(proj_result) == 2 &&
+           isa(proj_result[1], AbstractArray) && isa(proj_result[2], AbstractArray)
+            x_chunk, y_chunk = proj_result
+        else
+            x_chunk = first.(proj_result)
+            y_chunk = last.(proj_result)
+        end
 
-        # Drop lon/lat to save memory
         lon_chunk = nothing
         lat_chunk = nothing
 
@@ -106,7 +121,6 @@ function compute_local_data(ncfile::String;
         y_sorted    = y_chunk[sorted_idx]
         time_sorted = time_chunk[sorted_idx]
 
-        # Drop old chunk arrays to free memory
         pid_chunk  = nothing
         x_chunk    = nothing
         y_chunk    = nothing
@@ -115,7 +129,6 @@ function compute_local_data(ncfile::String;
         # Group by pid
         breaks = vcat(1, findall(diff(pid_sorted) .!= 0) .+ 1, length(pid_sorted)+1)
 
-        # Parallel per-particle processing
         @threads for g in 1:(length(breaks)-1)
             tid = threadid()
             local_dt = thread_dt[tid]
@@ -143,7 +156,6 @@ function compute_local_data(ncfile::String;
             end
         end
 
-        # Drop sorted arrays after processing
         pid_sorted  = nothing
         x_sorted    = nothing
         y_sorted    = nothing
@@ -152,14 +164,12 @@ function compute_local_data(ncfile::String;
 
     close(ds)
 
-    # Reduce Thread Buffers
     for tid in 1:nthreads
         dt_sum_cell        .+= thread_dt[tid]
         time_weighted_cell .+= thread_tw[tid]
         n_particles_cell   .+= thread_np[tid]
     end
 
-    # Build DataFrame
     n_rows = count(!iszero, n_particles_cell)
     rows = Vector{NamedTuple}(undef, n_rows)
     k = 1
@@ -179,7 +189,6 @@ function compute_local_data(ncfile::String;
     df.mean_exp_time  = df.dt_sum ./ df.n_particles
     df.mean_water_age = df.time_weighted ./ df.dt_sum
 
-    # Save Outputs
     csv_path = replace(ncfile, ".nc" => ".csv")
     if isfile(csv_path)
         println("CSV already exists. Skipping recomputation: $csv_path")
@@ -188,7 +197,6 @@ function compute_local_data(ncfile::String;
         println("Saved results to $csv_path")
     end
 
-    # Save compact metadata (change #2)
     meta_path = replace(ncfile, ".nc" => ".meta.json")
     meta = Dict(
         "grid_size" => grid_size,
@@ -200,7 +208,6 @@ function compute_local_data(ncfile::String;
     JSON3.write(meta_path, meta)
     println("Saved compact metadata to $meta_path")
 
-    # Cleanup checkpoint after success
     try
         if isfile(bbox_tmpfile)
             rm(bbox_tmpfile; force=true)
@@ -211,57 +218,6 @@ function compute_local_data(ncfile::String;
     end
 
     return df
-end
-
-# Convert CSV + Metadata to GeoPackage or Shapefile
-function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPKG")
-    df = CSV.read(csv_path, DataFrame)
-    meta = JSON3.read(read(meta_path, String))
-
-    grid_size = meta["grid_size"]
-    (min_x, max_x, min_y, max_y) = meta["bounds"]
-    n_x, n_y = meta["n_x"], meta["n_y"]
-    target_crs = meta["target_crs"]
-
-    edges_x = collect(min_x:grid_size:max_x)
-    edges_y = collect(min_y:grid_size:max_y)
-
-    df.geometry = [
-        GeometryBasics.Polygon(Point2f[
-            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin]),
-            Point2f(edges_x[r.x_bin+1],   edges_y[r.y_bin]),
-            Point2f(edges_x[r.x_bin+1],   edges_y[r.y_bin+1]),
-            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin+1]),
-            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin])
-        ])
-        for r in eachrow(df)
-    ]
-
-    gdf = GeoDataFrame(df, geometry=:geometry)
-    GeoDataFrames.setcrs!(gdf, target_crs)
-
-    output_path = replace(csv_path, ".csv" => fmt == "SHP" ? ".shp" : ".gpkg")
-
-    ArchGDAL.create(output_path, driver=fmt) do dataset
-        srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
-        layer = ArchGDAL.create_layer(dataset, "grid_data"; srs=srs)
-
-        for c in names(df)
-            if c != :geometry
-                t = eltype(df[!, c]) <: Integer ? ArchGDAL.OFTInteger : ArchGDAL.OFTReal
-                ArchGDAL.createfield(layer, String(c) => t)
-            end
-        end
-
-        for r in eachrow(df)
-            geom = ArchGDAL.creategeometry(r.geometry)
-            attrs = Dict(Symbol(k)=>r[k] for k in names(df) if k != :geometry)  # change #5
-            ArchGDAL.createfeature(layer, geom, attrs)
-        end
-    end
-
-    println("Exported geospatial data to $output_path")
-    return gdf
 end
 
 # Plot Heatmap
