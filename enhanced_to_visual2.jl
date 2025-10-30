@@ -220,6 +220,56 @@ function compute_local_data(ncfile::String;
     return df
 end
 
+function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPKG")
+    df = CSV.read(csv_path, DataFrame)
+    meta = JSON3.read(read(meta_path, String))
+
+    grid_size = meta["grid_size"]
+    (min_x, max_x, min_y, max_y) = meta["bounds"]
+    n_x, n_y = meta["n_x"], meta["n_y"]
+    target_crs = meta["target_crs"]
+
+    edges_x = collect(min_x:grid_size:max_x)
+    edges_y = collect(min_y:grid_size:max_y)
+
+    df.geometry = [
+        GeometryBasics.Polygon(Point2f[
+            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin]),
+            Point2f(edges_x[r.x_bin+1],   edges_y[r.y_bin]),
+            Point2f(edges_x[r.x_bin+1],   edges_y[r.y_bin+1]),
+            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin+1]),
+            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin])
+        ])
+        for r in eachrow(df)
+    ]
+
+    gdf = GeoDataFrame(df, geometry=:geometry)
+    GeoDataFrames.setcrs!(gdf, target_crs)
+
+    output_path = replace(csv_path, ".csv" => fmt == "SHP" ? ".shp" : ".gpkg")
+
+    ArchGDAL.create(output_path, driver=fmt) do dataset
+        srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
+        layer = ArchGDAL.create_layer(dataset, "grid_data"; srs=srs)
+
+        for c in names(df)
+            if c != :geometry
+                t = eltype(df[!, c]) <: Integer ? ArchGDAL.OFTInteger : ArchGDAL.OFTReal
+                ArchGDAL.createfield(layer, String(c) => t)
+            end
+        end
+
+        for r in eachrow(df)
+            geom = ArchGDAL.creategeometry(r.geometry)
+            attrs = Dict(Symbol(k)=>r[k] for k in names(df) if k != :geometry)
+            ArchGDAL.createfeature(layer, geom, attrs)
+        end
+    end
+
+    println("Exported geospatial data to $output_path")
+    return gdf
+end
+
 # Plot Heatmap
 function plot_heatmap(gdf, value_col::Symbol, title::String, output_path::String;
                       crs="EPSG:3857", cmap=:viridis, log_scale=true, units=3600)
@@ -287,3 +337,4 @@ function main(; resume=false)
 end
 
 main()
+
