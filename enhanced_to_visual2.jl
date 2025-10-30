@@ -222,7 +222,7 @@ end
 
 function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPKG")
     df = CSV.read(csv_path, DataFrame)
-    meta = JSON3.read(read(meta_path, String))
+    meta = JSON3.read(Base.read(meta_path, String))
 
     grid_size = meta["grid_size"]
     (min_x, max_x, min_y, max_y) = meta["bounds"]
@@ -342,3 +342,4 @@ end
 
 # Call
 main()
+
