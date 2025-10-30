@@ -317,24 +317,28 @@ function main(; resume=false)
     crs_proj = "EPSG:5070"
     chunk_size = 10_000_000
 
-    csv_path = replace(ncfile, ".nc" => ".csv")
+    csv_path  = replace(ncfile, ".nc" => ".csv")
     meta_path = replace(ncfile, ".nc" => ".meta.json")
 
-    if resume && isfile(csv_path) && isfile(meta_path)
-        println("Resuming from existing CSV and metadata.")
+    # Check for existing CSV + metadata
+    if isfile(csv_path) && isfile(meta_path)
+        println("Detected existing CSV and metadata files.")
+        println("Skipping computation and proceeding to geospatial build...")
     else
         println("Computing local exposure and water age...")
         compute_local_data(ncfile; grid_size=grid_size, target_crs=crs_proj, chunk_size=chunk_size)
     end
 
+    # Proceed to geospatial export 
     println("Building geospatial file...")
     gdf = export_geospatial(csv_path, meta_path; fmt="GPKG")
 
+    # Plot results
     println("Plotting heatmap...")
     plot_heatmap(gdf, :mean_exp_time, "Mean Exposure Time", "heatmap_exposure.png"; crs="EPSG:3857")
 
     println("All done.")
 end
 
+# Call
 main()
-
