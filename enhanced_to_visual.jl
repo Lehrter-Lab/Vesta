@@ -244,7 +244,8 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPK
     ]
 
     # Replace GeoDataFrame with GeoTable
-    gdf = GeoTables.GeoTable(df; geometry=:geometry, crs=target_crs)
+    gdf = GeoTables.GeoTable(df)
+    GeoTables.setgeometry!(gdf, :geometry)
     output_path = replace(csv_path, ".csv" => fmt == "SHP" ? ".shp" : ".gpkg")
 
     ArchGDAL.create(output_path, driver=fmt) do dataset
@@ -341,4 +342,5 @@ end
 
 # Call
 main()
+
 
