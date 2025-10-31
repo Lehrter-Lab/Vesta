@@ -1,5 +1,5 @@
 using DataFrames, CSV, Statistics, JSON3
-using ArchGDAL, GeometryBasics, GeoDataFrames, Proj, NCDatasets
+using ArchGDAL, GeometryBasics, GeoDataFrames, Proj, NCDatasets, GeoTables
 using CairoMakie, Colors, ThreadsX, Base.Threads
 using FilePathsBase
 
@@ -221,6 +221,8 @@ function compute_local_data(ncfile::String;
 end
 
 function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPKG")
+    using CSV, DataFrames, GeometryBasics, GeoTables, ArchGDAL, JSON3
+
     df = CSV.read(csv_path, DataFrame)
     meta = JSON3.read(Base.read(meta_path, String))
 
@@ -243,9 +245,8 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPK
         for r in eachrow(df)
     ]
 
-    gdf = GeoDataFrames.GeoDataFrame(df, geometry=:geometry)
-    GeoDataFrames.setcrs!(gdf, target_crs)
-
+    # Replace GeoDataFrame with GeoTable
+    gdf = GeoTables.GeoTable(df; geometry=:geometry, crs=target_crs)
     output_path = replace(csv_path, ".csv" => fmt == "SHP" ? ".shp" : ".gpkg")
 
     ArchGDAL.create(output_path, driver=fmt) do dataset
@@ -342,5 +343,6 @@ end
 
 # Call
 main()
+
 
 
