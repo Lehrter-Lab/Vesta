@@ -243,7 +243,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPK
         for r in eachrow(df)
     ]
 
-    gdf = GeoDataFrame(df, geometry=:geometry)
+    gdf = GeoDataFrames.GeoDataFrame(df, geometry=:geometry)
     GeoDataFrames.setcrs!(gdf, target_crs)
 
     output_path = replace(csv_path, ".csv" => fmt == "SHP" ? ".shp" : ".gpkg")
@@ -342,4 +342,5 @@ end
 
 # Call
 main()
+
 
