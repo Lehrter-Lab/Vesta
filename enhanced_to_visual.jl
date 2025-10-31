@@ -221,8 +221,6 @@ function compute_local_data(ncfile::String;
 end
 
 function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPKG")
-    using CSV, DataFrames, GeometryBasics, GeoTables, ArchGDAL, JSON3
-
     df = CSV.read(csv_path, DataFrame)
     meta = JSON3.read(Base.read(meta_path, String))
 
@@ -343,3 +341,4 @@ end
 
 # Call
 main()
+
