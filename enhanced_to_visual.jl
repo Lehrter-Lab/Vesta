@@ -234,7 +234,8 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     geotransform = (min_x, xres, 0.0, max_y, 0.0, -yres)  # origin = top-left
 
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
-
+    nbands = length(numeric_cols)
+  
     output_path = replace(csv_path, ".csv" => ".tif")
     driver = ArchGDAL.getdriver(fmt)
     ArchGDAL.create(driver_obj;
@@ -343,6 +344,7 @@ end
 
 # Call
 main()
+
 
 
 
