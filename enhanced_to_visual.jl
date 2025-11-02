@@ -231,18 +231,18 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
 
     ncols, nrows = n_x, n_y
     xres, yres = grid_size, grid_size
-    geotransform = (min_x, xres, 0.0, max_y, 0.0, -yres)  # origin = top-left
+    geotransform = (min_x, xres, 0.0, max_y, 0.0, -yres)
 
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
     nbands = length(numeric_cols)
 
     output_path = replace(csv_path, ".csv" => ".tif")
-    driver_obj = ArchGDAL.getdriver(fmt)  # fix: use consistent name
+    driver_obj = ArchGDAL.getdriver(fmt)
     ArchGDAL.create(driver_obj, filename=output_path;
       width=ncols, height=nrows, nbands=nbands,
-      dtype=ArchGDAL.GDT_Float64) do dataset  # fix: proper positional driver + keywords
+      dtype=Float64) do datase
 
-        epsg_code = parse(Int, replace(target_crs, "EPSG:" => ""))  # fix: robust EPSG parsing
+        epsg_code = parse(Int, replace(target_crs, "EPSG:" => ""))
         srs = ArchGDAL.importEPSG(epsg_code)
         ArchGDAL.setproj!(dataset, srs)
         ArchGDAL.setgeotransform!(dataset, geotransform)
@@ -255,7 +255,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
             for r in eachrow(df)
                 xi, yi = r.x_bin, r.y_bin
                 if 1 <= xi <= ncols && 1 <= yi <= nrows
-                    data[nrows - yi + 1, xi] = r[col]  # flip vertically
+                    data[nrows - yi + 1, xi] = r[col]
                 end
             end
             ArchGDAL.write!(band, data)
@@ -342,3 +342,4 @@ end
 
 # Call
 main()
+
