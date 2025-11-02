@@ -220,7 +220,7 @@ function compute_local_data(ncfile::String;
     return df
 end
 
-unction export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
+function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
     df = CSV.read(csv_path, DataFrame)
     meta = JSON3.read(Base.read(meta_path, String))
 
@@ -339,4 +339,5 @@ end
 
 # Call
 main()
+
 
