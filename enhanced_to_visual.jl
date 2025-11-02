@@ -262,44 +262,35 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     return [replace(csv_path, ".csv" => "_$(col).tif") for col in numeric_cols]
 end
 
-# Plot Heatmap
-function plot_heatmap(gdf, value_col::Symbol, title::String, output_path::String;
-                      crs="EPSG:3857", cmap=:viridis, log_scale=true, units=3600)
-    data = deepcopy(gdf)
+# Plot Heatmap from GeoTIFF instead of GeoDataFrame
+function plot_heatmap_raster(raster_path::String, title::String, output_path::String;
+                             cmap=:viridis, log_scale=true, units=3600)
+    ArchGDAL.read(raster_path) do dataset
+        band = ArchGDAL.getband(dataset, 1)
+        array = ArchGDAL.read(band)
+        array = Float64.(array)
 
-    if occursin("time", String(value_col)) || occursin("age", String(value_col)) || occursin("exp", String(value_col))
-        data[!, value_col] ./= units
-    end
-
-    if log_scale
-        data = filter(row -> row[value_col] > 0, data)
-        if isempty(data)
-            @warn "No valid data for plotting $value_col"
-            return nothing
+        if log_scale
+            array = array[array .> 0]
+            if isempty(array)
+                @warn "No valid data for plotting $raster_path"
+                return nothing
+            end
+            vmin, vmax = extrema(array)
+            norm_fn = log10
+        else
+            vmin, vmax = extrema(array)
+            norm_fn = identity
         end
-        vmin, vmax = extrema(data[!, value_col])
-        norm_fn = log10
-    else
-        vmin, vmax = extrema(data[!, value_col])
-        norm_fn = identity
+
+        fig = Figure(resolution=(1200,800))
+        ax  = Axis(fig[1,1], title=title)
+        heatmap!(ax, norm_fn.(array), colormap=cmap)
+        Colorbar(fig[1,2], limits=(vmin,vmax), colormap=cmap, label=title)
+        save(output_path, fig)
+        println("Saved raster heatmap to $output_path")
+        return fig
     end
-
-    if crs != data.crs
-        data = GeoDataFrames.reproject(data, crs)
-    end
-
-    polys = data.geometry
-    vals  = norm_fn.(data[!, value_col])
-
-    fig = Figure(resolution=(1200,800))
-    ax  = Axis(fig[1,1], title=title)
-    poly!(ax, polys, color=vals, colormap=cmap)
-    Colorbar(fig[1,2], limits=(vmin,vmax), colormap=cmap, label=title)
-    fig[0,:] = Label(fig, title, fontsize=18)
-
-    save(output_path, fig)
-    println("Saved plot to $output_path")
-    return fig
 end
 
 # Main
@@ -312,28 +303,25 @@ function main(; resume=false)
     csv_path  = replace(ncfile, ".nc" => ".csv")
     meta_path = replace(ncfile, ".nc" => ".meta.json")
 
-    # Check for existing CSV + metadata
-    if isfile(csv_path) && isfile(meta_path)
-        println("Detected existing CSV and metadata files.")
-        println("Skipping computation and proceeding to geospatial build...")
-    else
+    # Compute CSV + metadata if missing
+    if !(isfile(csv_path) && isfile(meta_path))
         println("Computing local exposure and water age...")
         compute_local_data(ncfile; grid_size=grid_size, target_crs=crs_proj, chunk_size=chunk_size)
     end
 
-    # Proceed to geospatial export 
-    println("Building geospatial file...")
-    gdf = export_geospatial(csv_path, meta_path; fmt="GPKG")
+    # Export each numeric column as a single-band GeoTIFF
+    println("Building geospatial files...")
+    raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")
 
-    # Plot results
-    println("Plotting heatmap...")
-    plot_heatmap(gdf, :mean_exp_time, "Mean Exposure Time", "heatmap_exposure.png"; crs="EPSG:3857")
+    # Plot the first numeric column as heatmap
+    if !isempty(raster_paths)
+        first_raster = raster_paths[1]
+        title = replace(basename(first_raster), ".tif"=>"")
+        plot_heatmap_raster(first_raster, title, "heatmap_$(title).png"; cmap=:viridis)
+    end
 
     println("All done.")
 end
 
 # Call
 main()
-
-
-
