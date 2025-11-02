@@ -237,8 +237,12 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
 
     output_path = replace(csv_path, ".csv" => ".tif")
     driver = ArchGDAL.getdriver(fmt)
-    ArchGDAL.create(driver, output_path, ncols, nrows, length(numeric_cols),
-                    ArchGDAL.GDT_Float64) do dataset
+    ArchGDAL.create(driver_obj;
+      filename=output_path,
+      width=n_x,
+      height=n_y,
+      nbands=nbands,
+      dtype=ArchGDAL.GDT_Float64) do dataset
         srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
         ArchGDAL.setproj!(dataset, srs)
         ArchGDAL.setgeotransform!(dataset, geotransform)
@@ -339,5 +343,6 @@ end
 
 # Call
 main()
+
 
 
