@@ -220,54 +220,57 @@ function compute_local_data(ncfile::String;
     return df
 end
 
-function export_geospatial(csv_path::String, meta_path::String; fmt::String="GPKG")
+function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
+    # Load data
     df = CSV.read(csv_path, DataFrame)
-    meta = JSON3.read(Base.read(meta_path, String))
+    meta = JSON3.read(read(meta_path, String))
 
     grid_size = meta["grid_size"]
     (min_x, max_x, min_y, max_y) = meta["bounds"]
     n_x, n_y = meta["n_x"], meta["n_y"]
     target_crs = meta["target_crs"]
 
-    edges_x = collect(min_x:grid_size:max_x)
-    edges_y = collect(min_y:grid_size:max_y)
+    # Initialize raster geometry
+    ncols, nrows = n_x, n_y
+    xres, yres = grid_size, grid_size
+    geotransform = (min_x, xres, 0.0, max_y, 0.0, -yres)  # origin top-left
 
-    df.geometry = [
-        GeometryBasics.Polygon(Point2f[
-            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin]),
-            Point2f(edges_x[r.x_bin+1],   edges_y[r.y_bin]),
-            Point2f(edges_x[r.x_bin+1],   edges_y[r.y_bin+1]),
-            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin+1]),
-            Point2f(edges_x[r.x_bin],     edges_y[r.y_bin])
-        ])
-        for r in eachrow(df)
-    ]
+    # Identify numeric columns to export
+    numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
 
-    # Replace GeoDataFrame with GeoTable
-    gdf = GeoTables.GeoTable(df)
-    GeoTables.setgeometry!(gdf, :geometry)
-    output_path = replace(csv_path, ".csv" => fmt == "SHP" ? ".shp" : ".gpkg")
-
-    ArchGDAL.create(output_path, driver=fmt) do dataset
+    # Generate output
+    output_path = replace(csv_path, ".csv" => ".tif")
+    ArchGDAL.create(output_path, driver=fmt, width=ncols, height=nrows,
+                    nbands=length(numeric_cols), dtype=ArchGDAL.GDT_Float64) do dataset
         srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
-        layer = ArchGDAL.create_layer(dataset, "grid_data"; srs=srs)
+        ArchGDAL.setproj!(dataset, srs)
+        ArchGDAL.setgeotransform!(dataset, geotransform)
 
-        for c in names(df)
-            if c != :geometry
-                t = eltype(df[!, c]) <: Integer ? ArchGDAL.OFTInteger : ArchGDAL.OFTReal
-                ArchGDAL.createfield(layer, String(c) => t)
+        # For each band = one numeric column
+        for (i, col) in enumerate(numeric_cols)
+            band = ArchGDAL.getband(dataset, i)
+            ArchGDAL.setbandname!(band, String(col))
+            data = fill(NaN, nrows, ncols)
+
+            # Populate raster values
+            for r in eachrow(df)
+                xi, yi = r.x_bin, r.y_bin
+                if 1 <= xi <= ncols && 1 <= yi <= nrows
+                    # Flip vertically because raster origin is top-left
+                    data[nrows - yi + 1, xi] = r[col]
+                end
             end
-        end
-
-        for r in eachrow(df)
-            geom = ArchGDAL.creategeometry(r.geometry)
-            attrs = Dict(Symbol(k)=>r[k] for k in names(df) if k != :geometry)
-            ArchGDAL.createfeature(layer, geom, attrs)
+            ArchGDAL.write!(band, data)
         end
     end
 
-    println("Exported geospatial data to $output_path")
-    return gdf
+    println("Exported multi-band GeoTIFF → $output_path")
+    println("Bands:")
+    for (i, col) in enumerate(numeric_cols)
+        println("  Band $i: $col")
+    end
+
+    return output_path
 end
 
 # Plot Heatmap
@@ -342,5 +345,3 @@ end
 
 # Call
 main()
-
-
