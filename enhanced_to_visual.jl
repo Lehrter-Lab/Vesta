@@ -240,7 +240,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     driver_obj = ArchGDAL.getdriver(fmt)
     ArchGDAL.create(driver_obj, filename=output_path;
       width=ncols, height=nrows, nbands=nbands,
-      dtype=Float64) do datase
+      dtype=Float32) do datase
 
         epsg_code = parse(Int, replace(target_crs, "EPSG:" => ""))
         srs = ArchGDAL.importEPSG(epsg_code)
@@ -342,4 +342,5 @@ end
 
 # Call
 main()
+
 
