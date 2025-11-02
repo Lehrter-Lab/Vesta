@@ -228,9 +228,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     (min_x, max_x, min_y, max_y) = meta["bounds"]
     n_x, n_y = meta["n_x"], meta["n_y"]
     target_crs = meta["target_crs"]
-
-    geotransform = (min_x, grid_size, 0.0, max_y, 0.0, -grid_size)  # top-left origin
-
+    geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
 
     for col in numeric_cols
@@ -251,7 +249,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
                 for r in eachrow(df)
                     xi, yi = r.x_bin, r.y_bin
                     if 1 <= xi <= n_x && 1 <= yi <= n_y
-                        data[n_y - yi + 1, xi] = Float32(r[col])  # flip vertically
+                        data[n_y - yi + 1, xi] = Float32(r[col])
                     end
                 end
                 ArchGDAL.write!(band, data)
@@ -325,4 +323,5 @@ end
 
 # Call
 main()
+
 
