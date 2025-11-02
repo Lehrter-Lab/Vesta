@@ -235,16 +235,15 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
 
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
     nbands = length(numeric_cols)
-  
+
     output_path = replace(csv_path, ".csv" => ".tif")
-    driver = ArchGDAL.getdriver(fmt)
-    ArchGDAL.create(driver_obj;
-      filename=output_path,
-      width=n_x,
-      height=n_y,
-      nbands=nbands,
-      dtype=ArchGDAL.GDT_Float64) do dataset
-        srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
+    driver_obj = ArchGDAL.getdriver(fmt)  # fix: use consistent name
+    ArchGDAL.create(driver_obj, filename=output_path;
+      width=ncols, height=nrows, nbands=nbands,
+      dtype=ArchGDAL.GDT_Float64) do dataset  # fix: proper positional driver + keywords
+
+        epsg_code = parse(Int, replace(target_crs, "EPSG:" => ""))  # fix: robust EPSG parsing
+        srs = ArchGDAL.importEPSG(epsg_code)
         ArchGDAL.setproj!(dataset, srs)
         ArchGDAL.setgeotransform!(dataset, geotransform)
 
@@ -264,7 +263,6 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     end
 
     println("Exported multi-band GeoTIFF → $output_path")
-    println("Bands:")
     for (i, col) in enumerate(numeric_cols)
         println("  Band $i: $col")
     end
@@ -344,7 +342,3 @@ end
 
 # Call
 main()
-
-
-
-
