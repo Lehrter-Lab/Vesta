@@ -229,45 +229,37 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     n_x, n_y = meta["n_x"], meta["n_y"]
     target_crs = meta["target_crs"]
 
-    ncols, nrows = n_x, n_y
-    xres, yres = grid_size, grid_size
-    geotransform = (min_x, xres, 0.0, max_y, 0.0, -yres)
+    geotransform = (min_x, grid_size, 0.0, max_y, 0.0, -grid_size)  # top-left origin
 
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
-    nbands = length(numeric_cols)
 
-    output_path = replace(csv_path, ".csv" => ".tif")
-    driver_obj = ArchGDAL.getdriver(fmt)
-    ArchGDAL.create(driver_obj, filename=output_path;
-      width=ncols, height=nrows, nbands=nbands,
-      dtype=Float32) do datase
+    for col in numeric_cols
+        output_path = replace(csv_path, ".csv" => "_$(col).tif")
+        driver = ArchGDAL.getdriver(fmt)
+        ArchGDAL.create(driver;
+            filename=output_path,
+            width=n_x,
+            height=n_y,
+            nbands=1,
+            dtype=Float32) do dataset
+                srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
+                ArchGDAL.setproj!(dataset, srs)
+                ArchGDAL.setgeotransform!(dataset, geotransform)
 
-        epsg_code = parse(Int, replace(target_crs, "EPSG:" => ""))
-        srs = ArchGDAL.importEPSG(epsg_code)
-        ArchGDAL.setproj!(dataset, srs)
-        ArchGDAL.setgeotransform!(dataset, geotransform)
-
-        for (i, col) in enumerate(numeric_cols)
-            band = ArchGDAL.getband(dataset, i)
-            ArchGDAL.setbandname!(band, String(col))
-            data = fill(NaN, nrows, ncols)
-
-            for r in eachrow(df)
-                xi, yi = r.x_bin, r.y_bin
-                if 1 <= xi <= ncols && 1 <= yi <= nrows
-                    data[nrows - yi + 1, xi] = r[col]
+                band = ArchGDAL.getband(dataset, 1)
+                data = fill(NaN32, n_y, n_x)
+                for r in eachrow(df)
+                    xi, yi = r.x_bin, r.y_bin
+                    if 1 <= xi <= n_x && 1 <= yi <= n_y
+                        data[n_y - yi + 1, xi] = Float32(r[col])  # flip vertically
+                    end
                 end
-            end
-            ArchGDAL.write!(band, data)
+                ArchGDAL.write!(band, data)
         end
+        println("Exported single-band GeoTIFF → $output_path")
     end
 
-    println("Exported multi-band GeoTIFF → $output_path")
-    for (i, col) in enumerate(numeric_cols)
-        println("  Band $i: $col")
-    end
-
-    return output_path
+    return [replace(csv_path, ".csv" => "_$(col).tif") for col in numeric_cols]
 end
 
 # Plot Heatmap
@@ -342,5 +334,6 @@ end
 
 # Call
 main()
+
 
 
