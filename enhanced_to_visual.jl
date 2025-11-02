@@ -220,44 +220,38 @@ function compute_local_data(ncfile::String;
     return df
 end
 
-function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
-    # Load data
+unction export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
     df = CSV.read(csv_path, DataFrame)
-    meta = JSON3.read(read(meta_path, String))
+    meta = JSON3.read(Base.read(meta_path, String))
 
     grid_size = meta["grid_size"]
     (min_x, max_x, min_y, max_y) = meta["bounds"]
     n_x, n_y = meta["n_x"], meta["n_y"]
     target_crs = meta["target_crs"]
 
-    # Initialize raster geometry
     ncols, nrows = n_x, n_y
     xres, yres = grid_size, grid_size
-    geotransform = (min_x, xres, 0.0, max_y, 0.0, -yres)  # origin top-left
+    geotransform = (min_x, xres, 0.0, max_y, 0.0, -yres)  # origin = top-left
 
-    # Identify numeric columns to export
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
 
-    # Generate output
     output_path = replace(csv_path, ".csv" => ".tif")
-    ArchGDAL.create(output_path, driver=fmt, width=ncols, height=nrows,
-                    nbands=length(numeric_cols), dtype=ArchGDAL.GDT_Float64) do dataset
+    driver = ArchGDAL.getdriver(fmt)
+    ArchGDAL.create(driver, output_path, ncols, nrows, length(numeric_cols),
+                    ArchGDAL.GDT_Float64) do dataset
         srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
         ArchGDAL.setproj!(dataset, srs)
         ArchGDAL.setgeotransform!(dataset, geotransform)
 
-        # For each band = one numeric column
         for (i, col) in enumerate(numeric_cols)
             band = ArchGDAL.getband(dataset, i)
             ArchGDAL.setbandname!(band, String(col))
             data = fill(NaN, nrows, ncols)
 
-            # Populate raster values
             for r in eachrow(df)
                 xi, yi = r.x_bin, r.y_bin
                 if 1 <= xi <= ncols && 1 <= yi <= nrows
-                    # Flip vertically because raster origin is top-left
-                    data[nrows - yi + 1, xi] = r[col]
+                    data[nrows - yi + 1, xi] = r[col]  # flip vertically
                 end
             end
             ArchGDAL.write!(band, data)
@@ -284,7 +278,7 @@ function plot_heatmap(gdf, value_col::Symbol, title::String, output_path::String
 
     if log_scale
         data = filter(row -> row[value_col] > 0, data)
-        if isempty(data)  # change #7
+        if isempty(data)
             @warn "No valid data for plotting $value_col"
             return nothing
         end
@@ -345,3 +339,4 @@ end
 
 # Call
 main()
+
