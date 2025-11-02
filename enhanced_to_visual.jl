@@ -243,7 +243,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
             nbands=1,
             dtype=Float32) do dataset
                 srs = ArchGDAL.importEPSG(parse(Int, split(target_crs, ":")[2]))
-                ArchGDAL.setproj!(dataset, srs)
+                ArchGDAL.setproj!(dataset, ArchGDAL.toWKT(srs))
                 ArchGDAL.setgeotransform!(dataset, geotransform)
 
                 band = ArchGDAL.getband(dataset, 1)
@@ -325,3 +325,4 @@ end
 
 # Call
 main()
+
