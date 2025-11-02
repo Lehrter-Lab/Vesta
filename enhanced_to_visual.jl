@@ -229,7 +229,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     n_x, n_y = meta["n_x"], meta["n_y"]
     target_crs = meta["target_crs"]
     geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
-    numeric_cols = filter(c -> eltype(df[!, c]) <: Real, names(df))
+    numeric_cols = filter(c -> eltype(df[!, c]) <: Real && !(c in [:x_bin, :y_bin]), names(df))
 
     for col in numeric_cols
         output_path = replace(csv_path, ".csv" => "_$(col).tif")
@@ -323,5 +323,6 @@ end
 
 # Call
 main()
+
 
 
