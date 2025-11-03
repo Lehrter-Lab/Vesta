@@ -101,7 +101,7 @@ function compute_local_data(ncfile::String;
             time_chunk = ds["time"][start:stop]
         end
 
-        # Transform coordinates (robust version)
+        # Transform coordinates
         proj_result = trans_fwd.(lon_chunk, lat_chunk)
         if isa(proj_result, Tuple) && length(proj_result) == 2 &&
            isa(proj_result[1], AbstractArray) && isa(proj_result[2], AbstractArray)
@@ -323,6 +323,7 @@ end
 
 # Call
 main()
+
 
 
 
