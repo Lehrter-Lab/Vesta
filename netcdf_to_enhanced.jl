@@ -58,7 +58,7 @@ function save_particle_enhanced_parallel(path_nc::String, output_nc::String, dom
 
     n_chunks = ceil(Int, N / chunk_size)
 
-    Threads.@threads for c in 1:n_chunks
+    for c in 1:n_chunks
         start = (c - 1) * chunk_size + 1
         stop  = min(c * chunk_size, N)
         lon_chunk = ds["lon"][start:stop]
@@ -175,3 +175,4 @@ function main()
     println("Times NetCDF saved to $times_nc")
 end
 main()
+
