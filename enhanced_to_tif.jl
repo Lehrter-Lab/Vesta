@@ -260,37 +260,6 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     return [replace(csv_path, ".csv" => "_$(col).tif") for col in numeric_cols]
 end
 
-# Plot Heatmap from GeoTIFF instead of GeoDataFrame
-function plot_heatmap_raster(raster_path::String, title::String, output_path::String;
-                             cmap=:viridis, log_scale=true, units=3600)
-    ArchGDAL.read(raster_path) do dataset
-        band = ArchGDAL.getband(dataset, 1)
-        array = ArchGDAL.read(band)
-        array = Float64.(array)
-
-        if log_scale
-            array = array[array .> 0]
-            if isempty(array)
-                @warn "No valid data for plotting $raster_path"
-                return nothing
-            end
-            vmin, vmax = extrema(array)
-            norm_fn = log10
-        else
-            vmin, vmax = extrema(array)
-            norm_fn = identity
-        end
-
-        fig = Figure(resolution=(1200,800))
-        ax  = Axis(fig[1,1], title=title)
-        heatmap!(ax, norm_fn.(array), colormap=cmap)
-        Colorbar(fig[1,2], limits=(vmin,vmax), colormap=cmap, label=title)
-        save(output_path, fig)
-        println("Saved raster heatmap to $output_path")
-        return fig
-    end
-end
-
 # Main
 function main(; resume=false)
     ncfile = "particle_enhanced.nc"
