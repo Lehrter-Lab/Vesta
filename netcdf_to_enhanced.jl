@@ -38,10 +38,10 @@ function compute_inside_flags(lons::Vector{Float32}, lats::Vector{Float32}, doma
     inside_flags = falses(n)
 
     # Bounding box pre-filter
-    env = ArchGDAL.envelope(domain_geom)
+    env        = ArchGDAL.envelope(domain_geom)
     minx, maxx = env.MinX, env.MaxX
     miny, maxy = env.MinY, env.MaxY
-    idxs = findall((lons .>= minx) .& (lons .<= maxx) .& (lats .>= miny) .& (lats .<= maxy))
+    idxs       = findall((lons .>= minx) .& (lons .<= maxx) .& (lats .>= miny) .& (lats .<= maxy))
 
     # Threaded inside-domain check
     Threads.@threads for i in idxs
@@ -53,14 +53,14 @@ function compute_inside_flags(lons::Vector{Float32}, lats::Vector{Float32}, doma
 end
 function save_particle_enhanced_parallel(path_nc::String, output_nc::String, domain_geom::ArchGDAL.IGeometry; chunk_size::Int=1_000_000)
     ds = NCDataset(path_nc, "r")
-    N = length(ds["pid"][:])
+    N  = length(ds["pid"][:])
     inside_vec = falses(N)
 
     n_chunks = ceil(Int, N / chunk_size)
 
     Threads.@threads for c in 1:n_chunks
         start = (c - 1) * chunk_size + 1
-        stop = min(c * chunk_size, N)
+        stop  = min(c * chunk_size, N)
         lon_chunk = ds["lon"][start:stop]
         lat_chunk = ds["lat"][start:stop]
 
@@ -72,26 +72,26 @@ function save_particle_enhanced_parallel(path_nc::String, output_nc::String, dom
     # Save enhanced NetCDF
     ds_out = NCDataset(output_nc, "c")
     defDim(ds_out, "point", N)
-    var_pid = defVar(ds_out, "pid", Int32, ("point",))
-    var_lon = defVar(ds_out, "lon", Float32, ("point",))
-    var_lat = defVar(ds_out, "lat", Float32, ("point",))
-    var_time = defVar(ds_out, "time", Float32, ("point",))
+    var_pid    = defVar(ds_out, "pid", Int32, ("point",))
+    var_lon    = defVar(ds_out, "lon", Float32, ("point",))
+    var_lat    = defVar(ds_out, "lat", Float32, ("point",))
+    var_time   = defVar(ds_out, "time", Float32, ("point",))
     var_inside = defVar(ds_out, "inside", UInt8, ("point",))
 
-    var_pid[:] = ds["pid"][:]
-    var_lon[:] = ds["lon"][:]
-    var_lat[:] = ds["lat"][:]
-    var_time[:] = ds["time"][:]
+    var_pid[:]    = ds["pid"][:]
+    var_lon[:]    = ds["lon"][:]
+    var_lat[:]    = ds["lat"][:]
+    var_time[:]   = ds["time"][:]
     var_inside[:] = UInt8.(inside_vec)
 
     close(ds)
     close(ds_out)
 end
 function compute_times_chunked(input_nc::String, output_nc::String; chunk_size::Int=1_000_000)
-    ds = NCDataset(input_nc, "r")
-    Npoints = length(ds["pid"][:])
+    ds       = NCDataset(input_nc, "r")
+    Npoints  = length(ds["pid"][:])
     all_pids = ds["pid"][:]
-    max_pid = maximum(all_pids)
+    max_pid  = maximum(all_pids)
 
     # Output file
     ds_out = NCDataset(output_nc, "c")
@@ -103,7 +103,8 @@ function compute_times_chunked(input_nc::String, output_nc::String; chunk_size::
     first_exit_found = falses(max_pid)
     res_times   = zeros(Float32, max_pid)
     exp_times   = zeros(Float32, max_pid)
-    last_time   = fill(-1.0, max_pid)  # sentinel meaning "no time seen yet"
+    entry_time  = fill(NaN, max_pid)   # time when particle entered domain
+    last_time   = fill(NaN, max_pid)   # last time seen
 
     n_chunks = ceil(Int, Npoints / chunk_size)
     println("Processing $n_chunks chunks for $Npoints points across $(max_pid) pids...")
@@ -120,26 +121,27 @@ function compute_times_chunked(input_nc::String, output_nc::String; chunk_size::
         @inbounds for i_local in eachindex(chunk_idx)
             pid = pids[i_local]
             t   = times[i_local]
-
-            # Residence time
-            if !first_exit_found[pid]
-                if inside[i_local] == 0  # exited here
-                    if last_time[pid] > 0.0
-                        res_times[pid] = t - last_time[pid]  # residence = exit - entry
-                        first_exit_found[pid] = true
-                    end
-                end
+            inside_flag = inside[i_local] == 1
+        
+            # Track entry time
+            if isnan(entry_time[pid]) && inside_flag
+                entry_time[pid] = t
             end
-
-            # Exposure time (accumulate delta_T while inside)
-            if last_time[pid] > 0.0
+        
+            # Residence time: first exit
+            if !first_exit_found[pid] && !inside_flag && !isnan(entry_time[pid])
+                res_times[pid] = t - entry_time[pid]
+                first_exit_found[pid] = true
+            end
+        
+            # Exposure time: accumulate delta while inside
+            if !isnan(last_time[pid])
                 delta_T = t - last_time[pid]
-                if inside[i_local] == 1
+                if inside_flag
                     exp_times[pid] += delta_T
                 end
             end
-
-            # Update last_time always
+        
             last_time[pid] = t
         end
     end
@@ -173,5 +175,3 @@ function main()
     println("Times NetCDF saved to $times_nc")
 end
 main()
-
-
