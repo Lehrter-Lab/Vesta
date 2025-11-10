@@ -88,10 +88,12 @@ function save_particle_enhanced_parallel(path_nc::String, output_nc::String, dom
     close(ds_out)
 end
 function compute_times_chunked(input_nc::String, output_nc::String; chunk_size::Int=1_000_000)
-    ds       = NCDataset(input_nc, "r")
-    Npoints  = length(ds["pid"][:])
-    all_pids = ds["pid"][:]
-    max_pid  = maximum(all_pids)
+    ds         = NCDataset(input_nc, "r")
+    all_pids   = ds["pid"][:]
+    inside_vec = ds["inside"][:]
+    times_vec  = ds["time"][:]
+    max_pid    = maximum(all_pids)
+    Npoints    = length(all_pids)
 
     # Output file
     ds_out = NCDataset(output_nc, "c")
@@ -109,44 +111,55 @@ function compute_times_chunked(input_nc::String, output_nc::String; chunk_size::
     n_chunks = ceil(Int, Npoints / chunk_size)
     println("Processing $n_chunks chunks for $Npoints points across $(max_pid) pids...")
 
-    Threads.@threads for c in 1:n_chunks
+        for c in 1:n_chunks
         start_idx = (c - 1) * chunk_size + 1
         stop_idx  = min(c * chunk_size, Npoints)
         chunk_idx = start_idx:stop_idx
 
-        inside = ds["inside"][chunk_idx]
-        times  = ds["time"][chunk_idx]
-        pids   = all_pids[chunk_idx]
+        inside_chunk = inside_vec[chunk_idx]
+        time_chunk   = times_vec[chunk_idx]
+        pid_chunk    = all_pids[chunk_idx]
 
-        @inbounds for i_local in eachindex(chunk_idx)
-            pid = pids[i_local]
-            t   = times[i_local]
-            inside_flag = inside[i_local] == 1
-        
+        # Local per-thread accumulators
+        n_local = length(chunk_idx)
+        local_entry  = fill(NaN, n_local)
+        local_res    = zeros(Float32, n_local)
+        local_exp    = zeros(Float32, n_local)
+        local_last   = fill(NaN, n_local)
+
+        Threads.@threads for i_local in 1:n_local
+            pid = pid_chunk[i_local]
+            t   = time_chunk[i_local]
+            inside_flag = inside_chunk[i_local] == 1
+
             # Track entry time
             if isnan(entry_time[pid]) && inside_flag
                 entry_time[pid] = t
             end
-        
+
             # Residence time: first exit
             if !first_exit_found[pid] && !inside_flag && !isnan(entry_time[pid])
                 res_times[pid] = t - entry_time[pid]
                 first_exit_found[pid] = true
             end
-        
-            # Exposure time: accumulate delta while inside
+
+            # Exposure time
             if !isnan(last_time[pid])
                 delta_T = t - last_time[pid]
                 if inside_flag
                     exp_times[pid] += delta_T
                 end
             end
-        
+
             last_time[pid] = t
         end
     end
 
-    #Write results
+    # Write results
+    ds_out = NCDataset(output_nc, "c")
+    defDim(ds_out, "pid", max_pid)
+    var_res_time = defVar(ds_out, "res_time", Float32, ("pid",))
+    var_exp_time = defVar(ds_out, "exp_time", Float32, ("pid",))
     var_res_time[:] = res_times
     var_exp_time[:] = exp_times
 
@@ -175,4 +188,5 @@ function main()
     println("Times NetCDF saved to $times_nc")
 end
 main()
+
 
