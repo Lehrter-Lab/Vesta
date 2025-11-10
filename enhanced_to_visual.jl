@@ -5,7 +5,7 @@ using FilePathsBase
 
 # Compute and Save Tabular Results (CSV + Metadata)
 function compute_local_data(ncfile::String;
-                            grid_size::Float64=5_000.0,
+                            grid_size::Float64=2000.0,
                             target_crs::String="EPSG:5070",
                             chunk_size::Int=1_000_000)
 
@@ -323,7 +323,3 @@ end
 
 # Call
 main()
-
-
-
-
