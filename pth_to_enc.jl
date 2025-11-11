@@ -28,7 +28,7 @@ function load_polygons(shp_path::String)
                  hasproperty(shape, :points)      ? [(pt.x, pt.y) for pt in shape.points] :
                  error("Unknown polygon type")
         rings = isa(coords[1], Tuple) ? [coords] : coords
-        push!(polygons, [ [ (float(p[1]), float(p[2])) for p in ring ] for ring in rings ])
+        push!(polygons, [ [ (Float64(p[1]), Float64(p[2])) for p in ring ] for ring in rings ])
     end
     return polygons
 end
@@ -42,7 +42,7 @@ end
 
 # Reproject polygons to NAD83 (EPSG:4269)
 function reproject_polygons(polygons, src_epsg::Int)
-    src_proj = Proj4.Transformation("+init=EPSG:$src_epsg", "+init=EPSG:4269")
+    src_proj = Proj4.Transformation("EPSG:$src_epsg", "EPSG:4269")
     return [ [ (Proj4.transform(src_proj, p[1], p[2])...) for p in ring ] for poly in polygons, ring in poly ]
 end
 
@@ -154,7 +154,7 @@ function pth_to_enhanced_main(pth_file::String, shp_zip::String,
             header = readline(io)
             parts  = split(strip(header))
             length(parts)!=2 && continue
-            ok = try time_sec=parse(Float64,parts[1]); n_particles=parse(Int,parts[2]); true catch; false end
+            time_sec, n_particles = try parse(Float64, parts[1]), parse(Int, parts[2]) catch; continue end
             !ok && continue
             pidv   = Vector{Int}(undef,n_particles)
             lonv   = Vector{Float64}(undef,n_particles)
