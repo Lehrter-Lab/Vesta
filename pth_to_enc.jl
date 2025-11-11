@@ -155,7 +155,6 @@ function pth_to_enhanced_main(pth_file::String, shp_zip::String,
             parts  = split(strip(header))
             length(parts)!=2 && continue
             time_sec, n_particles = try parse(Float64, parts[1]), parse(Int, parts[2]) catch; continue end
-            !ok && continue
             pidv   = Vector{Int}(undef,n_particles)
             lonv   = Vector{Float64}(undef,n_particles)
             latv   = Vector{Float64}(undef,n_particles)
