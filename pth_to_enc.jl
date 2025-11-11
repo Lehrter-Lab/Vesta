@@ -76,11 +76,11 @@ function init_enhanced_nc(file::String; compress=4)
     ds = NCDataset(file, "c")
     defDim(ds, "point", Inf)
     v_pid    = defVar(ds, "pid", Int32, ("point",))
-    v_lon    = defVar(ds, "lon", Float32, ("point",); compress=compress, shuffle=true, chunksizes=(1,))
-    v_lat    = defVar(ds, "lat", Float32, ("point",); compress=compress, shuffle=true, chunksizes=(1,))
-    v_depth  = defVar(ds, "depth", Float32, ("point",); compress=compress, shuffle=true, chunksizes=(1,))
-    v_time   = defVar(ds, "time", Float64, ("point",); compress=compress, shuffle=true, chunksizes=(1,))
-    v_inside = defVar(ds, "inside", UInt8, ("point",); compress=compress, shuffle=true, chunksizes=(1,))
+    v_lon    = defVar(ds, "lon", Float32, ("point",); compress=compress, shuffle=true)
+    v_lat    = defVar(ds, "lat", Float32, ("point",); compress=compress, shuffle=true)
+    v_depth  = defVar(ds, "depth", Float32, ("point",); compress=compress, shuffle=true)
+    v_time   = defVar(ds, "time", Float64, ("point",); compress=compress, shuffle=true)
+    v_inside = defVar(ds, "inside", UInt8, ("point",); compress=compress, shuffle=true)
     return ds, (v_pid,v_lon,v_lat,v_depth,v_time,v_inside)
 end
 
@@ -193,5 +193,5 @@ function main()
     pth_to_enhanced_main(pth_file, shp_zip, enhanced_out, times_out)
 end
 
-# Cakk
+# Call
 main()
