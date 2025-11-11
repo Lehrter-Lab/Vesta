@@ -36,7 +36,14 @@ end
 # Parse EPSG from .prj text
 function parse_epsg(prj_text::Union{String,Nothing})
     if prj_text === nothing; return nothing end
-    m = match(r"EPSG:?\s*([0-9]{3,6})", prj_text, ignorecase=true)
+    m = match(Regex("EPSG:?[0-9]{3,6}", "i"), prj_text)  # "i" for ignore case
+    if m !== nothing
+        # Extract the digits using a capturing group
+        m_digits = match(r"[0-9]{3,6}", m.match)
+        return parse(Int, m_digits.match)
+    else
+        return nothing
+    end
     return m !== nothing ? parse(Int, m.captures[1]) : nothing
 end
 
