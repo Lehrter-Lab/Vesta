@@ -41,9 +41,22 @@ function parse_epsg(prj_text::Union{String,Nothing})
 end
 
 # Reproject polygons to NAD83 (EPSG:4269)
-function reproject_polygons(polygons, src_epsg::Int)
+function reproject_polygons(polygons::Vector{Vector{Vector{Tuple{Float64,Float64}}}}, src_epsg::Int)
+    # Set up transformation from source EPSG to NAD83
     src_proj = Proj4.Transformation("EPSG:$src_epsg", "EPSG:4269")
-    return [ [ (Proj4.transform(src_proj, p[1], p[2])...) for p in ring ] for poly in polygons, ring in poly ]
+
+    # Loop over each polygon and ring, transforming each point
+    reprojected = Vector{Vector{Vector{Tuple{Float64,Float64}}}}(undef, length(polygons))
+    for i_poly in 1:length(polygons)
+        poly = polygons[i_poly]
+        reprojected[i_poly] = Vector{Vector{Tuple{Float64,Float64}}}(undef, length(poly))
+        for i_ring in 1:length(poly)
+            ring = poly[i_ring]
+            reprojected[i_poly][i_ring] = [(Proj4.transform(src_proj, p[1], p[2])[1],
+                                            Proj4.transform(src_proj, p[1], p[2])[2]) for p in ring]
+        end
+    end
+    return reprojected
 end
 
 # Combine polygons into single ArchGDAL geometry
