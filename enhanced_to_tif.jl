@@ -270,7 +270,6 @@ function main(; resume=false)
     #   2. grid_size   → grid size in meters
     #   3. crs_proj    → target CRS string
     #   4. chunk_size  → chunk size (integer)
-    # Missing args fall back to defaults.
 
     # Defaults
     ncfile_default      = "particle_enhanced.nc"
@@ -305,4 +304,3 @@ end
 
 # Call
 main()
-
