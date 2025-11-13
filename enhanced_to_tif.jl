@@ -258,28 +258,44 @@ end
 
 # Main
 function main(; resume=false)
-    # Optional STDIN input:
-    # Provide up to four space-separated arguments via stdin, e.g.:
-    #   echo "particle_enhanced.nc 5000.0 EPSG:5070 10000000" | julia script.jl
-    # Arguments (in order):
-    #   1. ncfile      → path to input NetCDF
-    #   2. grid_size   → grid size in meters
-    #   3. crs_proj    → target CRS string
-    #   4. chunk_size  → chunk size (integer)
+    # Example STDIN input:
+    # echo "ncfile=particle_enhanced.nc grid_size=5000.0 crs_proj=EPSG:5070 chunk_size=10000000" | julia script.jl
 
     # Defaults
-    ncfile_default      = "particle_enhanced.nc"
-    grid_size_default   = 5000.0
-    crs_proj_default    = "EPSG:5070"
-    chunk_size_default  = 10_000_000
+    defaults = Dict("ncfile"     => "particle_enhanced.nc",
+                    "grid_size"  => "5000.0",
+                    "crs_proj"   => "EPSG:5070",
+                    "chunk_size" => "10000000")
 
-    # Read optional stdin line
+    # Read optional line from STDIN
     input_line = try readline(stdin) catch; "" end
-    args       = split(strip(input_line))
-    ncfile     = get(args, 1, ncfile_default)
-    grid_size  = parse(Float64, get(args, 2, string(grid_size_default)))
-    crs_proj   = get(args, 3, crs_proj_default)
-    chunk_size = parse(Int, get(args, 4, string(chunk_size_default)))
+    args = split(strip(input_line))
+
+    # Parse name=value pairs into a Dict
+    input_dict = Dict{String,String}()
+    for arg in args
+        if occursin('=', arg)
+            k, v = split(arg, "=", limit=2)
+            k = strip(k); v = strip(v)
+
+            if k ∈ valid_keys
+                input_dict[k] = v
+            else
+                @warn "Unrecognized argument name: $k (ignored)"
+            end
+        elseif !isempty(arg)
+            @warn "Ignoring malformed argument (missing '='): $arg"
+        end
+    end
+
+    # Merge with defaults (user-supplied values override)
+    params = merge(defaults, input_dict)
+
+    # Convert types
+    ncfile     = params["ncfile"]
+    grid_size  = parse(Float64, params["grid_size"])
+    crs_proj   = params["crs_proj"]
+    chunk_size = parse(Int, params["chunk_size"])
 
     # Derived paths
     csv_path  = replace(ncfile, ".nc" => ".csv")
@@ -293,7 +309,7 @@ function main(; resume=false)
 
     # Export each numeric column as a single-band GeoTIFF
     println("Building geospatial files...")
-    raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")0
+    raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")
 
     println("All done.")
 end
