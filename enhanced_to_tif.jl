@@ -298,17 +298,11 @@ function main(; resume=false)
 
     # Export each numeric column as a single-band GeoTIFF
     println("Building geospatial files...")
-    raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")
-
-    # Plot the first numeric column as heatmap
-    if !isempty(raster_paths)
-        first_raster = raster_paths[1]
-        title = replace(basename(first_raster), ".tif" => "")
-        plot_heatmap_raster(first_raster, title, "heatmap_$(title).png"; cmap=:viridis)
-    end
+    raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")0
 
     println("All done.")
 end
 
 # Call
 main()
+
