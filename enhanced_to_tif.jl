@@ -262,11 +262,31 @@ end
 
 # Main
 function main(; resume=false)
-    ncfile = "particle_enhanced.nc"
-    grid_size = 5000.0
-    crs_proj = "EPSG:5070"
-    chunk_size = 10_000_000
+    # Optional STDIN input:
+    # Provide up to four space-separated arguments via stdin, e.g.:
+    #   echo "particle_enhanced.nc 5000.0 EPSG:5070 10000000" | julia script.jl
+    # Arguments (in order):
+    #   1. ncfile      → path to input NetCDF
+    #   2. grid_size   → grid size in meters
+    #   3. crs_proj    → target CRS string
+    #   4. chunk_size  → chunk size (integer)
+    # Missing args fall back to defaults.
 
+    # Defaults
+    ncfile_default      = "particle_enhanced.nc"
+    grid_size_default   = 5000.0
+    crs_proj_default    = "EPSG:5070"
+    chunk_size_default  = 10_000_000
+
+    # Read optional stdin line
+    input_line = try readline(stdin) catch; "" end
+    args       = split(strip(input_line))
+    ncfile     = get(args, 1, ncfile_default)
+    grid_size  = parse(Float64, get(args, 2, string(grid_size_default)))
+    crs_proj   = get(args, 3, crs_proj_default)
+    chunk_size = parse(Int, get(args, 4, string(chunk_size_default)))
+
+    # Derived paths
     csv_path  = replace(ncfile, ".nc" => ".csv")
     meta_path = replace(ncfile, ".nc" => ".meta.json")
 
@@ -283,7 +303,7 @@ function main(; resume=false)
     # Plot the first numeric column as heatmap
     if !isempty(raster_paths)
         first_raster = raster_paths[1]
-        title = replace(basename(first_raster), ".tif"=>"")
+        title = replace(basename(first_raster), ".tif" => "")
         plot_heatmap_raster(first_raster, title, "heatmap_$(title).png"; cmap=:viridis)
     end
 
