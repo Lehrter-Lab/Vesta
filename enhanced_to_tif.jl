@@ -17,7 +17,7 @@ function compute_local_data(ncfile::String;
 
     if isfile(bbox_tmpfile)
         println("Found bounding box checkpoint: $bbox_tmpfile")
-        bbox_data = readlines(bbox_tmpfile)
+        bbox_data        = readlines(bbox_tmpfile)
         min_lon, max_lon = parse.(Float64, split(bbox_data[1]))
         min_lat, max_lat = parse.(Float64, split(bbox_data[2]))
         println("Loaded bounding box from checkpoint:")
@@ -73,8 +73,8 @@ function compute_local_data(ncfile::String;
     min_y, max_y = extrema(ys)
 
     # Build Equal-Area Grid
-    edges_x = min_x:grid_size:max_x
-    edges_y = min_y:grid_size:max_y
+    edges_x  = min_x:grid_size:max_x
+    edges_y  = min_y:grid_size:max_y
     n_x, n_y = length(edges_x)-1, length(edges_y)-1
 
     # Initialize Buffers
@@ -175,12 +175,10 @@ function compute_local_data(ncfile::String;
     k = 1
     for xi in 1:n_x, yi in 1:n_y
         if n_particles_cell[xi, yi] > 0
-            rows[k] = (
-                x_bin = xi, y_bin = yi,
-                dt_sum = dt_sum_cell[xi, yi],
-                time_weighted = time_weighted_cell[xi, yi],
-                n_particles = n_particles_cell[xi, yi]
-            )
+            rows[k] = (x_bin = xi, y_bin = yi,
+                       dt_sum = dt_sum_cell[xi, yi],
+                       time_weighted = time_weighted_cell[xi, yi],
+                       n_particles = n_particles_cell[xi, yi])
             k += 1
         end
     end
@@ -198,13 +196,11 @@ function compute_local_data(ncfile::String;
     end
 
     meta_path = replace(ncfile, ".nc" => ".meta.json")
-    meta = Dict(
-        "grid_size" => grid_size,
-        "target_crs" => target_crs,
-        "bounds" => (min_x, max_x, min_y, max_y),
-        "n_x" => n_x,
-        "n_y" => n_y
-    )
+    meta = Dict("grid_size" => grid_size,
+                "target_crs" => target_crs,
+                "bounds" => (min_x, max_x, min_y, max_y),
+                "n_x" => n_x,
+                "n_y" => n_y)
     JSON3.write(meta_path, meta)
     println("Saved compact metadata to $meta_path")
 
@@ -224,10 +220,10 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     df = CSV.read(csv_path, DataFrame)
     meta = JSON3.read(Base.read(meta_path, String))
 
-    grid_size = meta["grid_size"]
+    grid_size    = meta["grid_size"]
     (min_x, max_x, min_y, max_y) = meta["bounds"]
-    n_x, n_y = meta["n_x"], meta["n_y"]
-    target_crs = meta["target_crs"]
+    n_x, n_y     = meta["n_x"], meta["n_y"]
+    target_crs   = meta["target_crs"]
     geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real && !(c in [:x_bin, :y_bin]), names(df))
 
