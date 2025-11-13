@@ -168,14 +168,32 @@ function compute_times_chunked(input_nc::String, output_nc::String; chunk_size::
     println("Residence and exposure times saved to $output_nc")
 end
 function main()
-    zip_shp     = "../../juliaParticle/bbox_dissolve.zip" # your shapefile zip
-    extract_dir = "./shapefile_extracted"                 # temp folder for unzip
-    input_nc    = "./particle.nc"                         # input particle NetCDF
-    enhanced_nc = "./particle_enhanced.nc"                # output NetCDF with 'inside' flag
-    times_nc    = "./particle_times.nc"                   # output NetCDF with res/exp times
+    # Optional STDIN input:
+    # Provide up to five space-separated paths via stdin, e.g.:
+    #   echo "bbox.zip ./extract in.nc enh.nc times.nc" | julia script.jl
+    # If fewer than five arguments are given (or none), defaults are used.
 
+    # Defaults
+    zip_shp_default     = "../../juliaParticle/bbox_dissolve.zip"
+    extract_dir_default = "./shapefile_extracted"
+    input_nc_default    = "./particle.nc"
+    enhanced_nc_default = "./particle_enhanced.nc"
+    times_nc_default    = "./particle_times.nc"
+
+    # Read optional stdin line
+    input_line = try readline(stdin) catch; "" end
+    args = split(strip(input_line))
+    
+    zip_shp     = get(args, 1, zip_shp_default)
+    extract_dir = get(args, 2, extract_dir_default)
+    input_nc    = get(args, 3, input_nc_default)
+    enhanced_nc = get(args, 4, enhanced_nc_default)
+    times_nc    = get(args, 5, times_nc_default)
+
+    # Main workflow
     shp_path = unzip_shapefile(zip_shp, extract_dir)
     println("Shapefile extracted to: $shp_path")
+
     domain_geom = load_domain_geometry(shp_path)
     println("Domain geometry loaded.")
 
@@ -188,5 +206,3 @@ function main()
     println("Times NetCDF saved to $times_nc")
 end
 main()
-
-
