@@ -202,12 +202,46 @@ function pth_to_enhanced_main(pth_file::String, shp_zip::String,
 end
 
 # CLI interface with defaults
-function main()
-    # Default files: particle.pth, particle_enhanced.nc, particle_times.nc
-    pth_file     = length(ARGS)>=1 ? ARGS[1] : "particle.pth"
-    shp_zip      = length(ARGS)>=2 ? ARGS[2] : "../../juliaParticle/bbox_dissolve.zip"
-    enhanced_out = length(ARGS)>=3 ? ARGS[3] : "particle_enhanced.nc"
-    times_out    = length(ARGS)>=4 ? ARGS[4] : "particle_times.nc"
+function main(; resume=false)
+    # Example STDIN input:
+    # echo "pth_file=particle.pth shp_zip=../../juliaParticle/bbox_dissolve.zip enhanced_out=particle_enhanced.nc times_out=particle_times.nc" | julia pth_to_enhanced.jl
+
+    # Allowed keys and defaults
+    valid_keys = Set(["pth_file", "shp_zip", "enhanced_out", "times_out"])
+    defaults = Dict("pth_file"     => "particle.pth",
+                    "shp_zip"      => "../../juliaParticle/bbox_dissolve.zip",
+                    "enhanced_out" => "particle_enhanced.nc",
+                    "times_out"    => "particle_times.nc")
+
+    # Read optional line from STDIN
+    input_line = try readline(stdin) catch; "" end
+    args = split(strip(input_line))
+
+    # Parse name=value pairs into a Dict
+    input_dict = Dict{String,String}()
+    for arg in args
+        if occursin('=', arg)
+            k, v = split(arg, "=", limit=2)
+            k = strip(k); v = strip(v)
+            if k ∈ valid_keys
+                input_dict[k] = v
+            else
+                @warn "Unrecognized argument name: $k (ignored)"
+            end
+        elseif !isempty(arg)
+            @warn "Ignoring malformed argument (missing '='): $arg"
+        end
+    end
+
+    # Merge with defaults (user-supplied values override)
+    params = merge(defaults, input_dict)
+
+    # Call main processing function
+    pth_file     = params["pth_file"]
+    shp_zip      = params["shp_zip"]
+    enhanced_out = params["enhanced_out"]
+    times_out    = params["times_out"]
+
     pth_to_enhanced_main(pth_file, shp_zip, enhanced_out, times_out)
 end
 
