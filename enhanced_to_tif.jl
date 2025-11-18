@@ -261,7 +261,8 @@ function main(; resume=false)
     # Example STDIN input:
     # echo "ncfile=particle_enhanced.nc grid_size=5000.0 crs_proj=EPSG:5070 chunk_size=10000000" | julia script.jl
 
-    # Defaults
+    # Allowed keys and defaults
+    valid_keys = Set(["ncfile", "grid_size", "crs_proj", "chunk_size"])
     defaults = Dict("ncfile"     => "particle_enhanced.nc",
                     "grid_size"  => "5000.0",
                     "crs_proj"   => "EPSG:5070",
@@ -316,3 +317,4 @@ end
 
 # Call
 main()
+
