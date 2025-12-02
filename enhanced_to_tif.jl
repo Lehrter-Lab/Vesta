@@ -12,7 +12,9 @@ function compute_local_data(ncfile::String;
     ds = NCDataset(ncfile, "r")
     N  = length(ds["pid"])
 
-    # Bounding Box Checkpoint Logic
+    # -------------------------
+    # Bounding Box Checkpoint
+    # -------------------------
     bbox_tmpfile = replace(ncfile, ".nc" => ".bbox.tmp")
 
     if isfile(bbox_tmpfile)
@@ -54,7 +56,9 @@ function compute_local_data(ncfile::String;
         println("Saved bounding box checkpoint to $bbox_tmpfile")
     end
 
+    # -------------------------
     # Projection Setup
+    # -------------------------
     trans_fwd = Proj.Transformation("EPSG:4326", target_crs; always_xy=true)
     trans_inv = Proj.Transformation(target_crs, "EPSG:4326"; always_xy=true)
     println("Created transformations successfully.")
@@ -87,35 +91,51 @@ function compute_local_data(ncfile::String;
     thread_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
     thread_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
 
-    println("Pass 2: Processing in chunks...")
-
+    # -------------------------
+    # Progress checkpoint setup
+    # -------------------------
+    total_chunks = ceil(Int, N / chunk_size)
     chunk_indices = collect(1:chunk_size:N)
-    for i in 1:length(chunk_indices)
-        start = chunk_indices[i]
-        stop  = min(start+chunk_size-1, N)
+    progress_file = replace(ncfile, ".nc" => ".progress.tmp")
 
+    # Load last completed 10% milestone
+    completed_10pct = 0
+    if isfile(progress_file)
+        completed_10pct = parse(Int, readlines(progress_file)[1])
+        println("Resuming from $completed_10pct x 10% completed")
+    end
+
+    # Determine starting chunk
+    start_chunk = completed_10pct * ceil(Int, total_chunks/10) + 1
+    println("Processing chunks $start_chunk to $total_chunks out of $total_chunks total")
+
+    # -------------------------
+    # Chunk processing loop
+    # -------------------------
+    for i in start_chunk:total_chunks
+        start_idx = chunk_indices[i]
+        stop_idx  = min(start_idx+chunk_size-1, N)
+
+        println("Processing chunk $i / $total_chunks")
+
+        # --- your existing chunk processing logic here ---
         @views begin
-            pid_chunk  = ds["pid"][start:stop]
-            lon_chunk  = ds["lon"][start:stop]
-            lat_chunk  = ds["lat"][start:stop]
-            time_chunk = ds["time"][start:stop]
+            pid_chunk  = ds["pid"][start_idx:stop_idx]
+            lon_chunk  = ds["lon"][start_idx:stop_idx]
+            lat_chunk  = ds["lat"][start_idx:stop_idx]
+            time_chunk = ds["time"][start_idx:stop_idx]
         end
 
         # Transform coordinates
-        # Pack lon/lat into an N×2 array (Proj prefers this form)
         coords = hcat(lon_chunk[:], lat_chunk[:])
-        
-        # Apply transformation in one call (much faster than broadcasting)
         xy = Proj.transform(trans_fwd, coords)
-        
-        # Unpack into arrays with original shape
         x_chunk = reshape(xy[:, 1], size(lon_chunk))
         y_chunk = reshape(xy[:, 2], size(lon_chunk))
 
         lon_chunk = nothing
         lat_chunk = nothing
 
-        # Sort by particle id
+        # Sort and group by pid
         sorted_idx  = sortperm(pid_chunk)
         pid_sorted  = pid_chunk[sorted_idx]
         x_sorted    = x_chunk[sorted_idx]
@@ -127,7 +147,6 @@ function compute_local_data(ncfile::String;
         y_chunk    = nothing
         time_chunk = nothing
 
-        # Group by pid
         breaks = vcat(1, findall(diff(pid_sorted) .!= 0) .+ 1, length(pid_sorted)+1)
 
         @threads for g in 1:(length(breaks)-1)
@@ -161,16 +180,35 @@ function compute_local_data(ncfile::String;
         x_sorted    = nothing
         y_sorted    = nothing
         time_sorted = nothing
+
+        # -------------------------
+        # Save progress checkpoint every ~10%
+        # -------------------------
+        chunks_per_10pct = max(1, ceil(Int, total_chunks / 10))
+        if i % chunks_per_10pct == 0
+            checkpoint_10pct = i ÷ chunks_per_10pct
+            open(progress_file, "w") do io
+                println(io, checkpoint_10pct)
+                flush(io)
+            end
+            println("Saved progress checkpoint at ~$(checkpoint_10pct*10)% of total chunks")
+        end
     end
 
     close(ds)
 
+    # -------------------------
+    # Merge threads
+    # -------------------------
     for tid in 1:nthreads
         dt_sum_cell        .+= thread_dt[tid]
         time_weighted_cell .+= thread_tw[tid]
         n_particles_cell   .+= thread_np[tid]
     end
 
+    # -------------------------
+    # Save final CSV + metadata
+    # -------------------------
     n_rows = count(!iszero, n_particles_cell)
     rows = Vector{NamedTuple}(undef, n_rows)
     k = 1
@@ -205,6 +243,7 @@ function compute_local_data(ncfile::String;
     JSON3.write(meta_path, meta)
     println("Saved compact metadata to $meta_path")
 
+    # Delete bbox checkpoint if present
     try
         if isfile(bbox_tmpfile)
             rm(bbox_tmpfile; force=true)
@@ -318,5 +357,6 @@ end
 
 # Call
 main()
+
 
 
