@@ -123,10 +123,15 @@ function compute_local_data(ncfile::String;
         end
 
         # Transform coordinates
-        coords = hcat(lon_chunk[:], lat_chunk[:])
-        xy = Proj.transform(trans_fwd, coords)
-        x_chunk = reshape(xy[:, 1], size(lon_chunk))
-        y_chunk = reshape(xy[:, 2], size(lon_chunk))
+        lon_vec = lon_chunk[:]
+        lat_vec = lat_chunk[:]
+        
+        # Apply transformation using broadcasting
+        x_vec, y_vec = trans_fwd.(lon_vec, lat_vec)
+        
+        # Reshape back to original chunk shape
+        x_chunk = reshape(x_vec, size(lon_chunk))
+        y_chunk = reshape(y_vec, size(lon_chunk))
 
         lon_chunk = nothing
         lat_chunk = nothing
@@ -363,6 +368,7 @@ end
 
 # Call
 main()
+
 
 
 
