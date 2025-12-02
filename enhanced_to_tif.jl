@@ -128,6 +128,9 @@ function compute_local_data(ncfile::String;
         
         # Apply transformation using broadcasting
         x_vec, y_vec = trans_fwd.(lon_vec, lat_vec)
+        # Ensure arrays
+        x_vec = isa(x_vec, Number) ? [x_vec] : x_vec
+        y_vec = isa(y_vec, Number) ? [y_vec] : y_vec
         
         # Reshape back to original chunk shape
         x_chunk = reshape(x_vec, size(lon_chunk))
@@ -368,6 +371,7 @@ end
 
 # Call
 main()
+
 
 
 
