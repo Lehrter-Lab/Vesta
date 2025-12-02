@@ -16,6 +16,7 @@ function compute_local_data(ncfile::String;
     # Bounding Box Checkpoint
     # -------------------------
     bbox_tmpfile = replace(ncfile, ".nc" => ".bbox.tmp")
+
     if isfile(bbox_tmpfile)
         println("Found bounding box checkpoint: $bbox_tmpfile")
         bbox_data        = readlines(bbox_tmpfile)
@@ -24,7 +25,35 @@ function compute_local_data(ncfile::String;
         println("Loaded bounding box from checkpoint:")
         println("  lon: [$min_lon, $max_lon], lat: [$min_lat, $max_lat]")
     else
-        # ... your existing bounding box computation logic ...
+        println("Pass 1: Computing domain bounding box...")
+        min_lon, max_lon = Inf, -Inf
+        min_lat, max_lat = Inf, -Inf
+
+        for start in 1:chunk_size:N
+            stop = min(start+chunk_size-1, N)
+            lons = @views ds["lon"][start:stop]
+            lats = @views ds["lat"][start:stop]
+
+            good = .!(isnan.(lons) .| isnan.(lats) .| (abs.(lons) .> 1e3) .| (abs.(lats) .> 1e3))
+            if any(good)
+                min_lon = min(min_lon, minimum(lons[good]))
+                max_lon = max(max_lon, maximum(lons[good]))
+                min_lat = min(min_lat, minimum(lats[good]))
+                max_lat = max(max_lat, maximum(lats[good]))
+            end
+        end
+
+        if !isfinite(min_lon) || !isfinite(min_lat)
+            close(ds)
+            error("No valid lon/lat values found in $ncfile")
+        end
+
+        open(bbox_tmpfile, "w") do io
+            println(io, "$min_lon $max_lon")
+            println(io, "$min_lat $max_lat")
+            flush(io)
+        end
+        println("Saved bounding box checkpoint to $bbox_tmpfile")
     end
 
     # -------------------------
@@ -35,10 +64,32 @@ function compute_local_data(ncfile::String;
     println("Created transformations successfully.")
 
     # Project Bounding Box
-    # ... your existing projection logic ...
+    corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
+    proj_corners = trans_fwd.(first.(corners), last.(corners))
+    if isa(proj_corners, Tuple) && length(proj_corners) == 2 &&
+       isa(proj_corners[1], AbstractArray) && isa(proj_corners[2], AbstractArray)
+        xs, ys = proj_corners
+    else
+        xs = first.(proj_corners)
+        ys = last.(proj_corners)
+    end
+    min_x, max_x = extrema(xs)
+    min_y, max_y = extrema(ys)
 
     # Build Equal-Area Grid
-    # ... your existing grid and buffer initialization ...
+    edges_x  = min_x:grid_size:max_x
+    edges_y  = min_y:grid_size:max_y
+    n_x, n_y = length(edges_x)-1, length(edges_y)-1
+
+    # Initialize Buffers
+    dt_sum_cell        = zeros(Float64, n_x, n_y)
+    time_weighted_cell = zeros(Float64, n_x, n_y)
+    n_particles_cell   = zeros(Int, n_x, n_y)
+
+    nthreads = Threads.nthreads()
+    thread_dt = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
+    thread_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
+    thread_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
 
     # -------------------------
     # Progress checkpoint setup
@@ -47,7 +98,6 @@ function compute_local_data(ncfile::String;
     chunk_indices = collect(1:chunk_size:N)
     progress_file = replace(ncfile, ".nc" => ".progress.tmp")
 
-    # Load last completed chunk index
     last_chunk_done = 0
     if isfile(progress_file)
         last_chunk_done = parse(Int, readlines(progress_file)[1])
@@ -65,7 +115,6 @@ function compute_local_data(ncfile::String;
 
         println("Processing chunk $i / $total_chunks")
 
-        # --- your existing chunk processing logic here ---
         @views begin
             pid_chunk  = ds["pid"][start_idx:stop_idx]
             lon_chunk  = ds["lon"][start_idx:stop_idx]
@@ -73,6 +122,7 @@ function compute_local_data(ncfile::String;
             time_chunk = ds["time"][start_idx:stop_idx]
         end
 
+        # Transform coordinates
         coords = hcat(lon_chunk[:], lat_chunk[:])
         xy = Proj.transform(trans_fwd, coords)
         x_chunk = reshape(xy[:, 1], size(lon_chunk))
@@ -132,7 +182,7 @@ function compute_local_data(ncfile::String;
         # -------------------------
         if i % chunks_per_10pct == 0 || i == total_chunks
             open(progress_file, "w") do io
-                println(io, i)  # store last fully completed chunk index
+                println(io, i)
                 flush(io)
             end
             println("Saved progress checkpoint at chunk $i / $total_chunks")
@@ -142,9 +192,50 @@ function compute_local_data(ncfile::String;
     close(ds)
 
     # -------------------------
-    # Merge threads and save CSV/metadata
+    # Merge threads
     # -------------------------
-    # ... your existing aggregation and CSV/metadata logic ...
+    for tid in 1:nthreads
+        dt_sum_cell        .+= thread_dt[tid]
+        time_weighted_cell .+= thread_tw[tid]
+        n_particles_cell   .+= thread_np[tid]
+    end
+
+    # -------------------------
+    # Save final CSV + metadata
+    # -------------------------
+    n_rows = count(!iszero, n_particles_cell)
+    rows = Vector{NamedTuple}(undef, n_rows)
+    k = 1
+    for xi in 1:n_x, yi in 1:n_y
+        if n_particles_cell[xi, yi] > 0
+            rows[k] = (x_bin = xi, y_bin = yi,
+                       dt_sum = dt_sum_cell[xi, yi],
+                       time_weighted = time_weighted_cell[xi, yi],
+                       n_particles = n_particles_cell[xi, yi])
+            k += 1
+        end
+    end
+
+    df = DataFrame(rows)
+    df.mean_exp_time  = df.dt_sum ./ df.n_particles
+    df.mean_water_age = df.time_weighted ./ df.dt_sum
+
+    csv_path = replace(ncfile, ".nc" => ".csv")
+    if isfile(csv_path)
+        println("CSV already exists. Skipping recomputation: $csv_path")
+    else
+        CSV.write(csv_path, df)
+        println("Saved results to $csv_path")
+    end
+
+    meta_path = replace(ncfile, ".nc" => ".meta.json")
+    meta = Dict("grid_size" => grid_size,
+                "target_crs" => target_crs,
+                "bounds" => (min_x, max_x, min_y, max_y),
+                "n_x" => n_x,
+                "n_y" => n_y)
+    JSON3.write(meta_path, meta)
+    println("Saved compact metadata to $meta_path")
 
     # -------------------------
     # Remove progress checkpoint after successful completion
@@ -272,6 +363,7 @@ end
 
 # Call
 main()
+
 
 
 
