@@ -16,7 +16,6 @@ function compute_local_data(ncfile::String;
     # Bounding Box Checkpoint
     # -------------------------
     bbox_tmpfile = replace(ncfile, ".nc" => ".bbox.tmp")
-
     if isfile(bbox_tmpfile)
         println("Found bounding box checkpoint: $bbox_tmpfile")
         bbox_data        = readlines(bbox_tmpfile)
@@ -25,35 +24,7 @@ function compute_local_data(ncfile::String;
         println("Loaded bounding box from checkpoint:")
         println("  lon: [$min_lon, $max_lon], lat: [$min_lat, $max_lat]")
     else
-        println("Pass 1: Computing domain bounding box...")
-        min_lon, max_lon = Inf, -Inf
-        min_lat, max_lat = Inf, -Inf
-
-        for start in 1:chunk_size:N
-            stop = min(start+chunk_size-1, N)
-            lons = @views ds["lon"][start:stop]
-            lats = @views ds["lat"][start:stop]
-
-            good = .!(isnan.(lons) .| isnan.(lats) .| (abs.(lons) .> 1e3) .| (abs.(lats) .> 1e3))
-            if any(good)
-                min_lon = min(min_lon, minimum(lons[good]))
-                max_lon = max(max_lon, maximum(lons[good]))
-                min_lat = min(min_lat, minimum(lats[good]))
-                max_lat = max(max_lat, maximum(lats[good]))
-            end
-        end
-
-        if !isfinite(min_lon) || !isfinite(min_lat)
-            close(ds)
-            error("No valid lon/lat values found in $ncfile")
-        end
-
-        open(bbox_tmpfile, "w") do io
-            println(io, "$min_lon $max_lon")
-            println(io, "$min_lat $max_lat")
-            flush(io)
-        end
-        println("Saved bounding box checkpoint to $bbox_tmpfile")
+        # ... your existing bounding box computation logic ...
     end
 
     # -------------------------
@@ -64,32 +35,10 @@ function compute_local_data(ncfile::String;
     println("Created transformations successfully.")
 
     # Project Bounding Box
-    corners = [(min_lon, min_lat), (max_lon, min_lat), (min_lon, max_lat), (max_lon, max_lat)]
-    proj_corners = trans_fwd.(first.(corners), last.(corners))
-    if isa(proj_corners, Tuple) && length(proj_corners) == 2 &&
-       isa(proj_corners[1], AbstractArray) && isa(proj_corners[2], AbstractArray)
-        xs, ys = proj_corners
-    else
-        xs = first.(proj_corners)
-        ys = last.(proj_corners)
-    end
-    min_x, max_x = extrema(xs)
-    min_y, max_y = extrema(ys)
+    # ... your existing projection logic ...
 
     # Build Equal-Area Grid
-    edges_x  = min_x:grid_size:max_x
-    edges_y  = min_y:grid_size:max_y
-    n_x, n_y = length(edges_x)-1, length(edges_y)-1
-
-    # Initialize Buffers
-    dt_sum_cell        = zeros(Float64, n_x, n_y)
-    time_weighted_cell = zeros(Float64, n_x, n_y)
-    n_particles_cell   = zeros(Int, n_x, n_y)
-
-    nthreads = Threads.nthreads()
-    thread_dt = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
-    thread_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
-    thread_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
+    # ... your existing grid and buffer initialization ...
 
     # -------------------------
     # Progress checkpoint setup
@@ -98,21 +47,19 @@ function compute_local_data(ncfile::String;
     chunk_indices = collect(1:chunk_size:N)
     progress_file = replace(ncfile, ".nc" => ".progress.tmp")
 
-    # Load last completed 10% milestone
-    completed_10pct = 0
+    # Load last completed chunk index
+    last_chunk_done = 0
     if isfile(progress_file)
-        completed_10pct = parse(Int, readlines(progress_file)[1])
-        println("Resuming from $completed_10pct x 10% completed")
+        last_chunk_done = parse(Int, readlines(progress_file)[1])
+        println("Resuming from chunk $last_chunk_done")
     end
 
-    # Determine starting chunk
-    start_chunk = completed_10pct * ceil(Int, total_chunks/10) + 1
-    println("Processing chunks $start_chunk to $total_chunks out of $total_chunks total")
+    chunks_per_10pct = max(1, ceil(Int, total_chunks / 10))
 
     # -------------------------
     # Chunk processing loop
     # -------------------------
-    for i in start_chunk:total_chunks
+    for i in (last_chunk_done + 1):total_chunks
         start_idx = chunk_indices[i]
         stop_idx  = min(start_idx+chunk_size-1, N)
 
@@ -126,7 +73,6 @@ function compute_local_data(ncfile::String;
             time_chunk = ds["time"][start_idx:stop_idx]
         end
 
-        # Transform coordinates
         coords = hcat(lon_chunk[:], lat_chunk[:])
         xy = Proj.transform(trans_fwd, coords)
         x_chunk = reshape(xy[:, 1], size(lon_chunk))
@@ -182,66 +128,35 @@ function compute_local_data(ncfile::String;
         time_sorted = nothing
 
         # -------------------------
-        # Save progress checkpoint every ~10%
+        # Save progress checkpoint every ~10% or last chunk
         # -------------------------
-        chunks_per_10pct = max(1, ceil(Int, total_chunks / 10))
-        if i % chunks_per_10pct == 0
-            checkpoint_10pct = i ÷ chunks_per_10pct
+        if i % chunks_per_10pct == 0 || i == total_chunks
             open(progress_file, "w") do io
-                println(io, checkpoint_10pct)
+                println(io, i)  # store last fully completed chunk index
                 flush(io)
             end
-            println("Saved progress checkpoint at ~$(checkpoint_10pct*10)% of total chunks")
+            println("Saved progress checkpoint at chunk $i / $total_chunks")
         end
     end
 
     close(ds)
 
     # -------------------------
-    # Merge threads
+    # Merge threads and save CSV/metadata
     # -------------------------
-    for tid in 1:nthreads
-        dt_sum_cell        .+= thread_dt[tid]
-        time_weighted_cell .+= thread_tw[tid]
-        n_particles_cell   .+= thread_np[tid]
-    end
+    # ... your existing aggregation and CSV/metadata logic ...
 
     # -------------------------
-    # Save final CSV + metadata
+    # Remove progress checkpoint after successful completion
     # -------------------------
-    n_rows = count(!iszero, n_particles_cell)
-    rows = Vector{NamedTuple}(undef, n_rows)
-    k = 1
-    for xi in 1:n_x, yi in 1:n_y
-        if n_particles_cell[xi, yi] > 0
-            rows[k] = (x_bin = xi, y_bin = yi,
-                       dt_sum = dt_sum_cell[xi, yi],
-                       time_weighted = time_weighted_cell[xi, yi],
-                       n_particles = n_particles_cell[xi, yi])
-            k += 1
+    try
+        if isfile(progress_file)
+            rm(progress_file; force=true)
+            println("Deleted progress checkpoint: $progress_file")
         end
+    catch err
+        @warn "Could not delete progress checkpoint" exception=(err, catch_backtrace())
     end
-
-    df = DataFrame(rows)
-    df.mean_exp_time  = df.dt_sum ./ df.n_particles
-    df.mean_water_age = df.time_weighted ./ df.dt_sum
-
-    csv_path = replace(ncfile, ".nc" => ".csv")
-    if isfile(csv_path)
-        println("CSV already exists. Skipping recomputation: $csv_path")
-    else
-        CSV.write(csv_path, df)
-        println("Saved results to $csv_path")
-    end
-
-    meta_path = replace(ncfile, ".nc" => ".meta.json")
-    meta = Dict("grid_size" => grid_size,
-                "target_crs" => target_crs,
-                "bounds" => (min_x, max_x, min_y, max_y),
-                "n_x" => n_x,
-                "n_y" => n_y)
-    JSON3.write(meta_path, meta)
-    println("Saved compact metadata to $meta_path")
 
     # Delete bbox checkpoint if present
     try
@@ -357,6 +272,7 @@ end
 
 # Call
 main()
+
 
 
 
