@@ -102,14 +102,15 @@ function compute_local_data(ncfile::String;
         end
 
         # Transform coordinates
-        proj_result = trans_fwd.(lon_chunk, lat_chunk)
-        if isa(proj_result, Tuple) && length(proj_result) == 2 &&
-           isa(proj_result[1], AbstractArray) && isa(proj_result[2], AbstractArray)
-            x_chunk, y_chunk = proj_result
-        else
-            x_chunk = first.(proj_result)
-            y_chunk = last.(proj_result)
-        end
+        # Pack lon/lat into an N×2 array (Proj prefers this form)
+        coords = hcat(lon_chunk[:], lat_chunk[:])
+        
+        # Apply transformation in one call (much faster than broadcasting)
+        xy = Proj.transform(trans_fwd, coords)
+        
+        # Unpack into arrays with original shape
+        x_chunk = reshape(xy[:, 1], size(lon_chunk))
+        y_chunk = reshape(xy[:, 2], size(lon_chunk))
 
         lon_chunk = nothing
         lat_chunk = nothing
@@ -317,4 +318,5 @@ end
 
 # Call
 main()
+
 
