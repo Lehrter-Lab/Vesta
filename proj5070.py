@@ -34,9 +34,8 @@ with Dataset(infile, "r") as src, Dataset(outfile, "w") as dst:
     # Vectorized projection: runs in compiled C code (very fast)
     x, y = transformer.transform(lon, lat)
 
-    # Write outputs
-    x_var = dst.createVariable("x_proj", "f8", ("point",), zlib=True)
-    y_var = dst.createVariable("y_proj", "f8", ("point",), zlib=True)
-
-    x_var[:] = x
-    y_var[:] = y
+    lon_var = dst.createVariable("lon", "f8", src.variables["lon"].dimensions, zlib=True)
+    lat_var = dst.createVariable("lat", "f8", src.variables["lat"].dimensions, zlib=True)
+    
+    lon_var[:] = x
+    lat_var[:] = y
