@@ -17,8 +17,8 @@ function compute_local_data(ncfile::String;
     # -------------------------
     # Determine grid from projected coordinates
     # -------------------------
-    x_all = ds["x_proj"][:]
-    y_all = ds["y_proj"][:]
+    x_all = ds["lon"][:]
+    y_all = ds["lat"][:]
 
     min_x, max_x = extrema(x_all)
     min_y, max_y = extrema(y_all)
@@ -60,8 +60,8 @@ function compute_local_data(ncfile::String;
 
         @views begin
             pid_chunk  = ds["pid"][start_idx:stop_idx]
-            x_chunk    = ds["x_proj"][start_idx:stop_idx]
-            y_chunk    = ds["y_proj"][start_idx:stop_idx]
+            x_chunk    = ds["lon"][start_idx:stop_idx]
+            y_chunk    = ds["lat"][start_idx:stop_idx]
             time_chunk = ds["time"][start_idx:stop_idx]
         end
 
@@ -230,7 +230,7 @@ function main()
 
     defaults = Dict(
         "ncfile" => "particle_enhanced.nc",
-        "grid_size" => "5000.0",
+        "grid_size" => "2500.0",
         "chunk_size" => "10000000"
     )
 
