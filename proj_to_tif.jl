@@ -41,12 +41,10 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
 
     # Initialize buffers
     dt_sum_cell        = zeros(Float64, n_x, n_y)
-    time_weighted_cell = zeros(Float64, n_x, n_y)
     n_particles_cell   = zeros(Int,     n_x, n_y)
 
     nthreads = Threads.nthreads()
     master_dt = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
-    master_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
     master_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
 
     # -------------------------
