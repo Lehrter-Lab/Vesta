@@ -212,10 +212,10 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     println("DEBUG: Raster dimensions n_x=$n_x n_y=$n_y"); flush(stdout)
 
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real && !(c in [:x_bin, :y_bin]), names(df))
-    println("DEBUG: Rasterizing columns: $(join(numeric_cols, \", \"))"); flush(stdout)
-
+    println("DEBUG: Rasterizing columns: $(join(numeric_cols, ", "))"); flush(stdout)
+    
     for col in numeric_cols
-        output_path = replace(csv_path, ".csv" => "_$(col).tif")
+        output_path = replace(csv_path, ".csv" => "_" * string(col) * ".tif")
         println("DEBUG: Creating raster $output_path"); flush(stdout)
 
         driver = ArchGDAL.getdriver(fmt)
