@@ -11,31 +11,40 @@ function compute_local_data(ncfile::String;
                             grid_size::Float64=2000.0,
                             chunk_size::Int=1_000_000)
 
+    println("DEBUG: Opening NetCDF file $ncfile"); flush(stdout)
     ds = NCDataset(ncfile, "r")
     N  = length(ds["pid"])
+    println("DEBUG: Opened NetCDF. N = $N particles"); flush(stdout)
 
     # -------------------------
-    # Determine grid from projected coordinates
+    # Determine grid
     # -------------------------
+    println("DEBUG: Loading coordinates..."); flush(stdout)
     x_all = ds["lon"][:]
     y_all = ds["lat"][:]
+    println("DEBUG: Coordinate arrays loaded"); flush(stdout)
 
     min_x, max_x = extrema(x_all)
     min_y, max_y = extrema(y_all)
+    println("DEBUG: Grid bounds X=[$min_x,$max_x] Y=[$min_y,$max_y]"); flush(stdout)
 
     edges_x = min_x:grid_size:max_x
     edges_y = min_y:grid_size:max_y
     n_x, n_y = length(edges_x)-1, length(edges_y)-1
+    println("DEBUG: Grid size n_x=$n_x n_y=$n_y"); flush(stdout)
 
     # Initialize Buffers
+    println("DEBUG: Allocating global grids..."); flush(stdout)
     dt_sum_cell        = zeros(Float64, n_x, n_y)
     time_weighted_cell = zeros(Float64, n_x, n_y)
-    n_particles_cell   = zeros(Int, n_x, n_y)
+    n_particles_cell   = zeros(Int,     n_x, n_y)
 
     nthreads = Threads.nthreads()
+    println("DEBUG: Threads = $nthreads. Allocating per-thread buffers..."); flush(stdout)
     thread_dt = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
     thread_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
     thread_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
+    println("DEBUG: Per-thread buffers allocated"); flush(stdout)
 
     # -------------------------
     # Chunk processing loop
@@ -47,7 +56,9 @@ function compute_local_data(ncfile::String;
 
     if isfile(progress_file)
         last_chunk_done = parse(Int, readlines(progress_file)[1])
-        println("Resuming from chunk $last_chunk_done")
+        println("DEBUG: Resuming from chunk $last_chunk_done"); flush(stdout)
+    else
+        println("DEBUG: No progress file. Starting fresh."); flush(stdout)
     end
 
     chunks_per_10pct = max(1, ceil(Int, total_chunks / 10))
@@ -56,7 +67,7 @@ function compute_local_data(ncfile::String;
         start_idx = chunk_indices[i]
         stop_idx  = min(start_idx+chunk_size-1, N)
 
-        println("Processing chunk $i / $total_chunks")
+        println("DEBUG: Chunk $i/$total_chunks  range = $start_idx:$stop_idx"); flush(stdout)
 
         @views begin
             pid_chunk  = ds["pid"][start_idx:stop_idx]
@@ -64,6 +75,7 @@ function compute_local_data(ncfile::String;
             y_chunk    = ds["lat"][start_idx:stop_idx]
             time_chunk = ds["time"][start_idx:stop_idx]
         end
+        println("DEBUG: Loaded raw chunk $i"); flush(stdout)
 
         # Sort and group by pid
         sorted_idx  = sortperm(pid_chunk)
@@ -71,6 +83,7 @@ function compute_local_data(ncfile::String;
         x_sorted    = x_chunk[sorted_idx]
         y_sorted    = y_chunk[sorted_idx]
         time_sorted = time_chunk[sorted_idx]
+        println("DEBUG: Sorted chunk $i"); flush(stdout)
 
         pid_chunk  = nothing
         x_chunk    = nothing
@@ -78,6 +91,7 @@ function compute_local_data(ncfile::String;
         time_chunk = nothing
 
         breaks = vcat(1, findall(diff(pid_sorted) .!= 0) .+ 1, length(pid_sorted)+1)
+        println("DEBUG: Found $(length(breaks)-1) PID groups in chunk $i"); flush(stdout)
 
         @threads for g in 1:(length(breaks)-1)
             tid = threadid()
@@ -105,36 +119,41 @@ function compute_local_data(ncfile::String;
                 end
             end
         end
+        println("DEBUG: Completed threaded update for chunk $i"); flush(stdout)
 
         pid_sorted  = nothing
         x_sorted    = nothing
         y_sorted    = nothing
         time_sorted = nothing
 
-        # Save progress checkpoint every ~10% or last chunk
+        # Save progress checkpoint
         if i % chunks_per_10pct == 0 || i == total_chunks
             open(progress_file, "w") do io
                 println(io, i)
                 flush(io)
             end
-            println("Saved progress checkpoint at chunk $i / $total_chunks")
+            println("DEBUG: Saved checkpoint at chunk $i"); flush(stdout)
         end
     end
 
+    println("DEBUG: Closing NetCDF"); flush(stdout)
     close(ds)
 
     # -------------------------
     # Merge threads
     # -------------------------
+    println("DEBUG: Merging thread results..."); flush(stdout)
     for tid in 1:nthreads
         dt_sum_cell        .+= thread_dt[tid]
         time_weighted_cell .+= thread_tw[tid]
         n_particles_cell   .+= thread_np[tid]
     end
+    println("DEBUG: Done merging threads"); flush(stdout)
 
     # -------------------------
     # Save final CSV + metadata
     # -------------------------
+    println("DEBUG: Building DataFrame..."); flush(stdout)
     n_rows = count(!iszero, n_particles_cell)
     rows = Vector{NamedTuple}(undef, n_rows)
     k = 1
@@ -147,28 +166,29 @@ function compute_local_data(ncfile::String;
             k += 1
         end
     end
+    println("DEBUG: DataFrame rows = $n_rows"); flush(stdout)
 
     df = DataFrame(rows)
     df.mean_exp_time  = df.dt_sum ./ df.n_particles
     df.mean_water_age = df.time_weighted ./ df.dt_sum
 
     csv_path = replace(ncfile, ".nc" => ".csv")
+    println("DEBUG: Writing CSV to $csv_path"); flush(stdout)
     CSV.write(csv_path, df)
-    println("Saved results to $csv_path")
 
     meta_path = replace(ncfile, ".nc" => ".meta.json")
+    println("DEBUG: Writing metadata to $meta_path"); flush(stdout)
     meta = Dict("grid_size" => grid_size,
                 "bounds" => (min_x, max_x, min_y, max_y),
                 "n_x" => n_x,
                 "n_y" => n_y)
     JSON3.write(meta_path, meta)
-    println("Saved compact metadata to $meta_path")
 
     # Remove progress checkpoint
     try
         if isfile(progress_file)
+            println("DEBUG: Removing progress checkpoint"); flush(stdout)
             rm(progress_file; force=true)
-            println("Deleted progress checkpoint: $progress_file")
         end
     catch err
         @warn "Could not delete progress checkpoint" exception=(err, catch_backtrace())
@@ -181,6 +201,7 @@ end
 # Export Geospatial Rasters
 # -------------------------
 function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
+    println("DEBUG: Loading CSV for raster export"); flush(stdout)
     df = CSV.read(csv_path, DataFrame)
     meta = JSON3.read(Base.read(meta_path, String))
 
@@ -188,11 +209,15 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     (min_x, max_x, min_y, max_y) = meta["bounds"]
     n_x, n_y     = meta["n_x"], meta["n_y"]
     geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
+    println("DEBUG: Raster dimensions n_x=$n_x n_y=$n_y"); flush(stdout)
 
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real && !(c in [:x_bin, :y_bin]), names(df))
+    println("DEBUG: Rasterizing columns: $(join(numeric_cols, \", \"))"); flush(stdout)
 
     for col in numeric_cols
         output_path = replace(csv_path, ".csv" => "_$(col).tif")
+        println("DEBUG: Creating raster $output_path"); flush(stdout)
+
         driver = ArchGDAL.getdriver(fmt)
         ArchGDAL.create(driver;
             filename=output_path,
@@ -200,7 +225,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
             height=n_y,
             nbands=1,
             dtype=Float32) do dataset
-                srs = ArchGDAL.importEPSG(5070)  # Adjust EPSG as needed
+                srs = ArchGDAL.importEPSG(5070)
                 ArchGDAL.setproj!(dataset, ArchGDAL.toWKT(srs))
                 ArchGDAL.setgeotransform!(dataset, geotransform)
 
@@ -214,7 +239,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
                 end
                 ArchGDAL.write!(band, data)
         end
-        println("Exported single-band GeoTIFF → $output_path")
+        println("DEBUG: Wrote GeoTIFF $output_path"); flush(stdout)
     end
 
     return [replace(csv_path, ".csv" => "_$(col).tif") for col in numeric_cols]
@@ -224,9 +249,11 @@ end
 # Main function
 # -------------------------
 function main()
-    # Read optional line from STDIN
+    println("DEBUG: Entering main()"); flush(stdout)
+
     input_line = try readline(stdin) catch; "" end
     args = split(strip(input_line))
+    println("DEBUG: Parsed args = $(args)"); flush(stdout)
 
     defaults = Dict(
         "ncfile" => "particle_enhanced.nc",
@@ -246,22 +273,22 @@ function main()
     ncfile = params["ncfile"]
     grid_size = parse(Float64, params["grid_size"])
     chunk_size = parse(Int, params["chunk_size"])
+    println("DEBUG: Running with ncfile=$ncfile grid=$grid_size chunk=$chunk_size"); flush(stdout)
 
-    # Derived paths
     csv_path  = replace(ncfile, ".nc" => ".csv")
     meta_path = replace(ncfile, ".nc" => ".meta.json")
 
-    # Compute CSV + metadata if missing
     if !(isfile(csv_path) && isfile(meta_path))
-        println("Computing local exposure and water age...")
+        println("DEBUG: CSV/meta missing. Running compute_local_data..."); flush(stdout)
         compute_local_data(ncfile; grid_size=grid_size, chunk_size=chunk_size)
+    else
+        println("DEBUG: Using existing CSV + metadata"); flush(stdout)
     end
 
-    # Export each numeric column as a single-band GeoTIFF
-    println("Building geospatial files...")
+    println("DEBUG: Starting export_geospatial..."); flush(stdout)
     raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")
 
-    println("All done.")
+    println("DEBUG: All done."); flush(stdout)
 end
 
 # Call main
