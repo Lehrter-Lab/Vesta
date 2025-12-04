@@ -279,7 +279,7 @@ function main()
     args = split(strip(input_line))
     println("DEBUG: Parsed args = $(args)"); flush(stdout)
 
-    defaults = Dict("ncfile" => "particle_enhanced.nc",
+    defaults = Dict("ncfile" => "particle_enhanced_proj.nc",
                     "grid_size" => "2500.0",
                     "chunk_size" => "10000000")
 
