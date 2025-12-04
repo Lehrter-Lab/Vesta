@@ -4,30 +4,6 @@ using ArchGDAL
 using ThreadsX, Base.Threads
 using FilePathsBase
 
-# ---------------------------
-# I'm paranoid now
-# ---------------------------
-function read_stdin_timeout(timeout_sec::Float64=5.0)
-    input_line = ""
-    t = @async try
-        readline(stdin)
-    catch
-        ""
-    end
-
-    ready = wait(t, timeout_sec)
-    if ready === nothing
-        println("DEBUG: No stdin input after $timeout_sec seconds, using defaults.")
-        flush(stdout)
-        input_line = ""
-    else
-        input_line = fetch(t)
-        println("DEBUG: Got stdin input: $input_line")
-        flush(stdout)
-    end
-    return input_line
-end
-
 # -------------------------
 # Compute and Save Tabular Results (CSV + Metadata)
 # -------------------------
@@ -275,7 +251,7 @@ end
 function main()
     println("DEBUG: Entering main()"); flush(stdout)
 
-    input_line = read_stdin_timeout(10.0)
+    input_line = try readline(stdin) catch _ "" end
     args = split(strip(input_line))
     println("DEBUG: Parsed args = $(args)"); flush(stdout)
 
