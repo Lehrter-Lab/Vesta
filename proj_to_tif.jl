@@ -1,0 +1,229 @@
+using DataFrames, CSV, Statistics, JSON3
+using NCDatasets
+using ArchGDAL
+using ThreadsX, Base.Threads
+using FilePathsBase
+
+function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_size::Float64=2000.0)
+    println("DEBUG: Opening NetCDF file $ncfile"); flush(stdout)
+    ds = NCDataset(ncfile, "r")
+    N_records = length(ds["pid"])
+    pid_all = ds["pid"][:]
+
+    # -------------------------
+    # Determine number of particles and timesteps
+    # Assumption: pid is sequential from 1 to max(pid) and repeats each timestep
+    # -------------------------
+    wrap_idx = findfirst(diff(pid_all) .< 0)
+    N_particles = wrap_idx
+    t_steps = N_records ÷ N_particles
+    println("DEBUG: Detected $N_particles particles per timestep over $t_steps timesteps"); flush(stdout)
+
+    # -------------------------
+    # Determine chunk size based on timesteps_per_chunk
+    # -------------------------
+    chunk_size = N_particles * timesteps_per_chunk
+    total_chunks = ceil(Int, N_records / chunk_size)
+    println("DEBUG: Processing in $total_chunks chunks of up to $chunk_size records each"); flush(stdout)
+
+    # -------------------------
+    # Load coordinates
+    # -------------------------
+    x_all = ds["lon"][:]
+    y_all = ds["lat"][:]
+    time_all = ds["time"][:]
+
+    min_x, max_x = extrema(x_all)
+    min_y, max_y = extrema(y_all)
+    edges_x = min_x:grid_size:max_x
+    edges_y = min_y:grid_size:max_y
+    n_x, n_y = length(edges_x)-1, length(edges_y)-1
+
+    # Initialize buffers
+    dt_sum_cell        = zeros(Float64, n_x, n_y)
+    time_weighted_cell = zeros(Float64, n_x, n_y)
+    n_particles_cell   = zeros(Int,     n_x, n_y)
+
+    nthreads = Threads.nthreads()
+    master_dt = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
+    master_tw = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
+    master_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
+
+    # -------------------------
+    # Process chunks
+    # -------------------------
+    for i in 0:(total_chunks-1)
+        start_idx = i*chunk_size + 1
+        stop_idx  = min((i+1)*chunk_size, N_records)
+        println("DEBUG: Chunk $i/$total_chunks  range = $start_idx:$stop_idx"); flush(stdout)
+
+        x_chunk    = x_all[start_idx:stop_idx]
+        y_chunk    = y_all[start_idx:stop_idx]
+        time_chunk = time_all[start_idx:stop_idx]
+
+        n_chunk_records = stop_idx - start_idx + 1
+        n_chunk_timesteps = ceil(Int, n_chunk_records / N_particles)
+
+        # -------------------------
+        # Process each particle instance sequentially
+        # -------------------------
+        @threads for t in 0:(n_chunk_timesteps-1)
+            tid = threadid()
+            local_dt = master_dt[tid]
+            local_np = master_np[tid]
+
+            ts_start = t*N_particles + 1
+            ts_end   = min((t+1)*N_particles, n_chunk_records)
+
+            for idx in (ts_start+1):ts_end
+                dt_val = time_chunk[idx] - time_chunk[idx-1]
+                if dt_val > 0
+                    x_val = x_chunk[idx]
+                    y_val = y_chunk[idx]
+                    x_bin = clamp(Int(floor((x_val - edges_x[1]) / grid_size)) + 1, 1, n_x)
+                    y_bin = clamp(Int(floor((y_val - edges_y[1]) / grid_size)) + 1, 1, n_y)
+                    @inbounds begin
+                        local_dt[x_bin, y_bin] += dt_val
+                        local_np[x_bin, y_bin] += 1
+                    end
+                end
+            end
+        end
+    end
+
+    close(ds)
+
+    # -------------------------
+    # Merge threads
+    # -------------------------
+    println("DEBUG: Merging thread results..."); flush(stdout)
+    for tid in 1:nthreads
+        dt_sum_cell        .+= master_dt[tid]
+        n_particles_cell   .+= master_np[tid]
+    end
+
+    # -------------------------
+    # Build DataFrame
+    # -------------------------
+    rows = Vector{NamedTuple}(undef, count(!iszero, n_particles_cell))
+    k = 1
+    for xi in 1:n_x, yi in 1:n_y
+        if n_particles_cell[xi, yi] > 0
+            rows[k] = (x_bin = xi, y_bin = yi,
+                       dt_sum = dt_sum_cell[xi, yi],
+                       n_particles = n_particles_cell[xi, yi])
+            k += 1
+        end
+    end
+
+    df = DataFrame(rows)
+    df.mean_exp_time  = df.dt_sum ./ df.n_particles
+    df.total_exp_time = df.dt_sum
+
+    csv_path = replace(ncfile, ".nc" => ".csv")
+    CSV.write(csv_path, df)
+
+    meta_path = replace(ncfile, ".nc" => ".meta.json")
+    meta = Dict("grid_size" => grid_size,
+                "bounds" => (min_x, max_x, min_y, max_y),
+                "n_x" => n_x,
+                "n_y" => n_y)
+    JSON3.write(meta_path, meta)
+
+    return df
+end
+
+# -------------------------
+# Export Geospatial Rasters
+# -------------------------
+function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
+    println("DEBUG: Loading CSV for raster export"); flush(stdout)
+    df = CSV.read(csv_path, DataFrame)
+    meta = JSON3.read(Base.read(meta_path, String))
+
+    grid_size    = meta["grid_size"]
+    (min_x, max_x, min_y, max_y) = meta["bounds"]
+    n_x, n_y     = meta["n_x"], meta["n_y"]
+    geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
+    println("DEBUG: Raster dimensions n_x=$n_x n_y=$n_y"); flush(stdout)
+
+    numeric_cols = filter(c -> eltype(df[!, c]) <: Real && !(c in [:x_bin, :y_bin]), names(df))
+    println("DEBUG: Rasterizing columns: $(join(numeric_cols, ", "))"); flush(stdout)
+    
+    for col in numeric_cols
+        output_path = replace(csv_path, ".csv" => "_" * string(col) * ".tif")
+        println("DEBUG: Creating raster $output_path"); flush(stdout)
+
+        driver = ArchGDAL.getdriver(fmt)
+        ArchGDAL.create(driver;
+            filename=output_path,
+            width=n_x,
+            height=n_y,
+            nbands=1,
+            dtype=Float32) do dataset
+                srs = ArchGDAL.importEPSG(5070)
+                ArchGDAL.setproj!(dataset, ArchGDAL.toWKT(srs))
+                ArchGDAL.setgeotransform!(dataset, geotransform)
+
+                band = ArchGDAL.getband(dataset, 1)
+                data = fill(NaN32, n_y, n_x)
+                for r in eachrow(df)
+                    xi, yi = r.x_bin, r.y_bin
+                    if 1 <= xi <= n_x && 1 <= yi <= n_y
+                        data[n_y - yi + 1, xi] = Float32(r[col])
+                    end
+                end
+                ArchGDAL.write!(band, data)
+        end
+        println("DEBUG: Wrote GeoTIFF $output_path"); flush(stdout)
+    end
+
+    return [replace(csv_path, ".csv" => "_$(col).tif") for col in numeric_cols]
+end
+
+# -------------------------
+# Main function
+# -------------------------
+function main()
+    println("DEBUG: Entering main()"); flush(stdout)
+
+    input_line = try readline(stdin) catch _ "" end
+    args = split(strip(input_line))
+    println("DEBUG: Parsed args = $(args)"); flush(stdout)
+  
+    defaults = Dict("ncfile" => "particle_enhanced_proj.nc",
+                "grid_size" => "2500.0",
+                "timesteps_per_chunk" => "10")
+
+    input_dict = Dict{String,String}()
+    for arg in args
+        if occursin('=', arg)
+            k, v = split(arg, "=", limit=2)
+            input_dict[strip(k)] = strip(v)
+        end
+    end
+
+    params = merge(defaults, input_dict)
+    ncfile = params["ncfile"]
+    grid_size = parse(Float64, params["grid_size"])
+    timesteps_per_chunk = parse(Int, params["timesteps_per_chunk"])
+    println("DEBUG: Running with ncfile=$ncfile grid=$grid_size timesteps_per_chunk=$timesteps_per_chunk"); flush(stdout)
+
+    csv_path  = replace(ncfile, ".nc" => ".csv")
+    meta_path = replace(ncfile, ".nc" => ".meta.json")
+
+    if !(isfile(csv_path) && isfile(meta_path))
+        println("DEBUG: CSV/meta missing. Running compute_local_data..."); flush(stdout)
+        compute_local_data(ncfile; grid_size=grid_size, timesteps_per_chunk=timesteps_per_chunk)
+    else
+        println("DEBUG: Using existing CSV + metadata"); flush(stdout)
+    end
+
+    println("DEBUG: Starting export_geospatial..."); flush(stdout)
+    raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")
+
+    println("DEBUG: All done."); flush(stdout)
+end
+
+# Call main
+main()
