@@ -147,7 +147,6 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
     println("DEBUG: Raster dimensions n_x=$n_x n_y=$n_y"); flush(stdout)
 
-    # Only export numeric columns that actually exist now
     numeric_cols = filter(c -> eltype(df[!, c]) <: Real && !(c in [:x_bin, :y_bin]), names(df))
     println("DEBUG: Rasterizing columns: $(join(numeric_cols, ", "))"); flush(stdout)
     
