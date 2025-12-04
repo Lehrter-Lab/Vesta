@@ -147,10 +147,10 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
     println("DEBUG: Raster dimensions n_x=$n_x n_y=$n_y"); flush(stdout)
 
-    numeric_cols = filter(c -> eltype(df[!, c]) <: Real && !(c in [:x_bin, :y_bin]), names(df))
-    println("DEBUG: Rasterizing columns: $(join(numeric_cols, ", "))"); flush(stdout)
+    export_cols = [:mean_exp_time, :total_exp_time]
+    println("DEBUG: Rasterizing columns: $(join(export_cols, ", "))"); flush(stdout)
     
-    for col in numeric_cols
+    for col in export_cols
         output_path = replace(csv_path, ".csv" => "_" * string(col) * ".tif")
         println("DEBUG: Creating raster $output_path"); flush(stdout)
 
@@ -178,7 +178,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
         println("DEBUG: Wrote GeoTIFF $output_path"); flush(stdout)
     end
 
-    return [replace(csv_path, ".csv" => "_$(col).tif") for col in numeric_cols]
+    return [replace(csv_path, ".csv" => "_$(col).tif") for col in export_cols]
 end
 
 # -------------------------
