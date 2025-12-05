@@ -35,8 +35,8 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
 
     min_x, max_x = extrema(x_all)
     min_y, max_y = extrema(y_all)
-    edges_x = min_x:grid_size:max_x
-    edges_y = min_y:grid_size:max_y
+    edges_x = collect(min_x:grid_size:max_x)
+    edges_y = collect(min_y:grid_size:max_y)
     n_x, n_y = length(edges_x)-1, length(edges_y)-1
 
     # Initialize buffers
@@ -69,25 +69,27 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
             tid = threadid()
             local_dt = master_dt[tid]
             local_np = master_np[tid]
-        
-            # iterate over timesteps for this particle in the chunk
+
             for t in 2:n_chunk_timesteps
                 idx_prev = (t-2)*N_particles + p
                 idx_curr = (t-1)*N_particles + p
-                # make sure we don't go past chunk
                 if idx_curr > n_chunk_records
                     break
                 end
-        
+
                 dt_val = time_chunk[idx_curr] - time_chunk[idx_prev]
                 if dt_val > 0
                     x_val = x_chunk[idx_curr]
                     y_val = y_chunk[idx_curr]
-                    x_bin = clamp(Int(floor((x_val - edges_x[1]) / grid_size)) + 1, 1, n_x)
-                    y_bin = clamp(Int(floor((y_val - edges_y[1]) / grid_size)) + 1, 1, n_y)
-                    @inbounds begin
-                        local_dt[x_bin, y_bin] += dt_val
-                        local_np[x_bin, y_bin] += 1
+
+                    # FIX: use proper binning with searchsortedlast
+                    x_bin = searchsortedlast(edges_x, x_val) - 1
+                    y_bin = searchsortedlast(edges_y, y_val) - 1
+                    if 1 ≤ x_bin ≤ n_x && 1 ≤ y_bin ≤ n_y
+                        @inbounds begin
+                            local_dt[x_bin, y_bin] += dt_val
+                            local_np[x_bin, y_bin] += 1
+                        end
                     end
                 end
             end
@@ -110,6 +112,7 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     println("DEBUG: Total particle counts in grid: ", sum(n_particles_cell))
     println("DEBUG: Max dt_sum in grid: ", maximum(dt_sum_cell))
+        
     rows = Vector{NamedTuple}(undef, n_x * n_y)
     k = 1
     for xi in 1:n_x, yi in 1:n_y
@@ -172,7 +175,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     # Top-left corner coordinates for geotransform
     # -------------------------
     x_top_left = min_x + (x_min_bin - 1) * grid_size
-    y_top_left = max_y - (y_min_bin - 1) * grid_size
+    y_top_left = max_y - (y_max_bin - 1) * grid_size
 
     geotransform = [x_top_left, grid_size, 0.0,
                     y_top_left, 0.0, -grid_size]
@@ -207,7 +210,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
             # Fill raster row by row from top to bottom
             for r in eachrow(df_nonempty)
                 xi = r.x_bin - x_min_bin + 1
-                yi = r.y_bin - y_min_bin + 1
+                yi = y_max_bin - r.y_bin + 1
                 data[yi, xi] = Float32(getfield(r, col))  # no need to flip height
             end
 
