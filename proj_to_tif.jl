@@ -152,39 +152,63 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     grid_size    = meta["grid_size"]
     (min_x, max_x, min_y, max_y) = meta["bounds"]
     n_x, n_y     = meta["n_x"], meta["n_y"]
-    geotransform = [min_x, grid_size, 0.0, max_y, 0.0, -grid_size]
-    println("DEBUG: Raster dimensions n_x=$n_x n_y=$n_y"); flush(stdout)
+    
+    df_nonempty = filter(r -> r.n_particles > 0, df)
+    if nrow(df_nonempty) == 0
+        println("DEBUG: No non-empty cells found. Skipping raster export.")
+        return String[]
+    end
+
+    x_min_bin = minimum(df_nonempty.x_bin)
+    x_max_bin = maximum(df_nonempty.x_bin)
+    y_min_bin = minimum(df_nonempty.y_bin)
+    y_max_bin = maximum(df_nonempty.y_bin)
+
+    width  = x_max_bin - x_min_bin + 1
+    height = y_max_bin - y_min_bin + 1
+    geotransform = [
+        min_x + (x_min_bin - 1) * grid_size, grid_size, 0.0,
+        max_y - (y_max_bin - 1) * grid_size, 0.0, -grid_size
+    ]
+
+    println("DEBUG: Shrunk raster dimensions width=$width height=$height"); flush(stdout)
 
     export_cols = [:mean_exp_time, :total_exp_time]
     println("DEBUG: Rasterizing columns: $(join(export_cols, ", "))"); flush(stdout)
     
-    for col in export_cols
-        output_path = replace(csv_path, ".csv" => "_" * string(col) * ".tif")
-        println("DEBUG: Creating raster $output_path"); flush(stdout)
-
-        driver = ArchGDAL.getdriver(fmt)
-        ArchGDAL.create(driver;
-            filename=output_path,
-            width=n_x,
-            height=n_y,
-            nbands=1,
-            dtype=Float32) do dataset
+    raster_paths = String[]
+        for col in export_cols
+            output_path = replace(csv_path, ".csv" => "_" * string(col) * ".tif")
+            println("DEBUG: Creating raster $output_path"); flush(stdout)
+    
+            driver = ArchGDAL.getdriver(fmt)
+            ArchGDAL.create(driver;
+                filename=output_path,
+                width=width,
+                height=height,
+                nbands=1,
+                dtype=Float32) do dataset
+    
                 srs = ArchGDAL.importEPSG(5070)
                 ArchGDAL.setproj!(dataset, ArchGDAL.toWKT(srs))
                 ArchGDAL.setgeotransform!(dataset, geotransform)
-
+    
                 band = ArchGDAL.getband(dataset, 1)
-                data = fill(NaN32, n_y, n_x)
-                for r in eachrow(df)
-                    xi, yi = r.x_bin, r.y_bin
-                    if 1 <= xi <= n_x && 1 <= yi <= n_y
-                        data[n_y - yi + 1, xi] = Float32(getfield(r, col))
-                    end
+                data = fill(NaN32, height, width)
+    
+                for r in eachrow(df_nonempty)
+                    xi = r.x_bin - x_min_bin + 1
+                    yi = r.y_bin - y_min_bin + 1
+                    data[height - yi + 1, xi] = Float32(getfield(r, col))
                 end
+    
                 ArchGDAL.write!(band, data)
+            end
+            println("DEBUG: Wrote GeoTIFF $output_path"); flush(stdout)
+            push!(raster_paths, output_path)
         end
-        println("DEBUG: Wrote GeoTIFF $output_path"); flush(stdout)
-    end
+
+    return raster_paths
 
     return [replace(csv_path, ".csv" => "_$(col).tif") for col in export_cols]
 end
