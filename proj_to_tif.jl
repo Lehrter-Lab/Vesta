@@ -103,6 +103,8 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     # Build DataFrame
     # -------------------------
+    println("DEBUG: Total particle counts in grid: ", sum(n_particles_cell))
+    println("DEBUG: Max dt_sum in grid: ", maximum(dt_sum_cell))
     rows = Vector{NamedTuple}(undef, n_x * n_y)
     k = 1
     for xi in 1:n_x, yi in 1:n_y
