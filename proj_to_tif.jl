@@ -16,7 +16,7 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     wrap_idx = findfirst(diff(pid_all) .< 0)
     N_particles = wrap_idx
-    t_steps = N_records ÷ N_particles
+    t_steps = N_records / N_particles
     println("DEBUG: Detected $N_particles particles per timestep over $t_steps timesteps"); flush(stdout)
 
     # -------------------------
@@ -103,15 +103,20 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     # Build DataFrame
     # -------------------------
-    rows = Vector{NamedTuple}(undef, count(!iszero, n_particles_cell))
+    rows = Vector{NamedTuple}(undef, n_x * n_y)
     k = 1
     for xi in 1:n_x, yi in 1:n_y
-        if n_particles_cell[xi, yi] > 0
-            rows[k] = (x_bin = xi, y_bin = yi,
-                       dt_sum = dt_sum_cell[xi, yi],
-                       n_particles = n_particles_cell[xi, yi])
-            k += 1
-        end
+        dt_val = dt_sum_cell[xi, yi]
+        np_val = n_particles_cell[xi, yi]
+        mean_val = np_val > 0 ? dt_val / np_val : NaN
+        total_val = np_val > 0 ? dt_val : NaN
+    
+        rows[k] = (x_bin = xi, y_bin = yi,
+                   dt_sum = dt_val,
+                   n_particles = np_val,
+                   mean_exp_time = mean_val,
+                   total_exp_time = total_val)
+        k += 1
     end
 
     df = DataFrame(rows)
