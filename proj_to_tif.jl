@@ -196,7 +196,8 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
             width=width,
             height=height,
             nbands=1,
-            dtype=Float32) do dataset
+            dtype=Float32,
+            options=["PIXELTYPE=FLOAT", "NODATA=-9999"]) do dataset
 
             srs = ArchGDAL.importEPSG(5070)
             ArchGDAL.setproj!(dataset, ArchGDAL.toWKT(srs))
