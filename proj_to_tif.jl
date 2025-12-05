@@ -178,7 +178,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
                 for r in eachrow(df)
                     xi, yi = r.x_bin, r.y_bin
                     if 1 <= xi <= n_x && 1 <= yi <= n_y
-                        data[n_y - yi + 1, xi] = Float32(r[col])
+                        data[n_y - yi + 1, xi] = Float32(getfield(r, col))
                     end
                 end
                 ArchGDAL.write!(band, data)
