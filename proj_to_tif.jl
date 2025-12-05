@@ -200,7 +200,7 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
             ArchGDAL.setgeotransform!(dataset, geotransform)
 
             band = ArchGDAL.getband(dataset, 1)
-            ArchGDAL.setnodata!(band, Float32(NaN))
+            ArchGDAL.setbandnodata!(band, Float32(NaN))
 
             data = fill(NaN32, height, width)
 
