@@ -168,9 +168,8 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
     height = y_max_bin - y_min_bin + 1
     geotransform = [
         min_x + (x_min_bin - 1) * grid_size, grid_size, 0.0,
-        max_y - (y_max_bin - 1) * grid_size, 0.0, -grid_size
+        max_y - (y_min_bin - 1) * grid_size, 0.0, -grid_size
     ]
-
     println("DEBUG: Shrunk raster dimensions width=$width height=$height"); flush(stdout)
 
     export_cols = [:mean_exp_time, :total_exp_time]
