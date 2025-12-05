@@ -145,86 +145,6 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
 end
 
 # -------------------------
-# Export Geospatial Rasters
-# -------------------------
-function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTiff")
-    println("DEBUG: Loading CSV for raster export"); flush(stdout)
-    df = CSV.read(csv_path, DataFrame)
-    meta = JSON3.read(Base.read(meta_path, String))
-
-    grid_size    = meta["grid_size"]
-    (min_x, max_x, min_y, max_y) = meta["bounds"]
-    n_x, n_y     = meta["n_x"], meta["n_y"]
-    
-    df_nonempty = filter(r -> r.n_particles > 0, df)
-    if nrow(df_nonempty) == 0
-        println("DEBUG: No non-empty cells found. Skipping raster export.")
-        return String[]
-    end
-
-    # Determine the bounds in bin space
-    x_min_bin = minimum(df_nonempty.x_bin)
-    x_max_bin = maximum(df_nonempty.x_bin)
-    y_min_bin = minimum(df_nonempty.y_bin)
-    y_max_bin = maximum(df_nonempty.y_bin)
-
-    width  = x_max_bin - x_min_bin + 1
-    height = y_max_bin - y_min_bin + 1
-
-    # -------------------------
-    # Top-left corner coordinates for geotransform
-    # -------------------------
-    x_top_left = min_x + (x_min_bin - 1) * grid_size
-    y_top_left = max_y - (y_max_bin - 1) * grid_size
-
-    geotransform = [x_top_left, grid_size, 0.0,
-                    y_top_left, 0.0, -grid_size]
-
-    println("DEBUG: Shrunk raster dimensions width=$width height=$height"); flush(stdout)
-
-    export_cols = [:mean_exp_time, :total_exp_time]
-    println("DEBUG: Rasterizing columns: $(join(export_cols, ", "))"); flush(stdout)
-    
-    raster_paths = String[]
-    for col in export_cols
-        output_path = replace(csv_path, ".csv" => "_" * string(col) * ".tif")
-        println("DEBUG: Creating raster $output_path"); flush(stdout)
-    
-        driver = ArchGDAL.getdriver(fmt)
-        ArchGDAL.create(driver;
-            filename=output_path,
-            width=width,
-            height=height,
-            nbands=1,
-            dtype=Float32,
-            options=["PIXELTYPE=FLOAT", "NODATA=-9999"]) do dataset
-
-            srs = ArchGDAL.importEPSG(5070)
-            ArchGDAL.setproj!(dataset, ArchGDAL.toWKT(srs))
-            ArchGDAL.setgeotransform!(dataset, geotransform)
-
-            band = ArchGDAL.getband(dataset, 1)
-            ArchGDAL.setnodata(band, Float64(NaN))
-
-            data = fill(NaN32, height, width)
-
-            # Fill raster row by row from top to bottom
-            for r in eachrow(df_nonempty)
-                xi = r.x_bin - x_min_bin + 1
-                yi = y_max_bin - r.y_bin + 1
-                data[yi, xi] = Float32(getfield(r, col))  # no need to flip height
-            end
-
-            ArchGDAL.write!(band, data)
-        end
-        println("DEBUG: Wrote GeoTIFF $output_path"); flush(stdout)
-        push!(raster_paths, output_path)
-    end
-
-    return raster_paths
-end
-
-# -------------------------
 # Main function
 # -------------------------
 function main()
@@ -255,16 +175,9 @@ function main()
     csv_path  = replace(ncfile, ".nc" => ".csv")
     meta_path = replace(ncfile, ".nc" => ".meta.json")
 
-    if !(isfile(csv_path) && isfile(meta_path))
-        println("DEBUG: CSV/meta missing. Running compute_local_data..."); flush(stdout)
-        compute_local_data(ncfile; grid_size=grid_size, timesteps_per_chunk=timesteps_per_chunk)
-    else
-        println("DEBUG: Using existing CSV + metadata"); flush(stdout)
-    end
-
-    println("DEBUG: Starting export_geospatial..."); flush(stdout)
-    raster_paths = export_geospatial(csv_path, meta_path; fmt="GTiff")
-
+    println("DEBUG: Running compute_local_data..."); flush(stdout)
+    compute_local_data(ncfile; grid_size=grid_size, timesteps_per_chunk=timesteps_per_chunk)
+    
     println("DEBUG: All done."); flush(stdout)
 end
 
