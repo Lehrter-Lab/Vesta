@@ -127,8 +127,6 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     end
 
     df = DataFrame(rows)
-    df.mean_exp_time  = df.dt_sum ./ df.n_particles
-    df.total_exp_time = df.dt_sum
 
     csv_path = replace(ncfile, ".nc" => ".csv")
     CSV.write(csv_path, df)
