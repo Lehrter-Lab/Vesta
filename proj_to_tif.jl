@@ -209,8 +209,6 @@ function export_geospatial(csv_path::String, meta_path::String; fmt::String="GTi
         end
 
     return raster_paths
-
-    return [replace(csv_path, ".csv" => "_$(col).tif") for col in export_cols]
 end
 
 # -------------------------
