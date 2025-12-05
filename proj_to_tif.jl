@@ -65,19 +65,24 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
         # -------------------------
         # Process each particle instance sequentially
         # -------------------------
-        @threads for t in 0:(n_chunk_timesteps-1)
+        @threads for p in 1:N_particles
             tid = threadid()
             local_dt = master_dt[tid]
             local_np = master_np[tid]
-
-            ts_start = t*N_particles + 1
-            ts_end   = min((t+1)*N_particles, n_chunk_records)
-
-            for idx in (ts_start+1):ts_end
-                dt_val = time_chunk[idx] - time_chunk[idx-1]
+        
+            # iterate over timesteps for this particle in the chunk
+            for t in 2:n_chunk_timesteps
+                idx_prev = (t-2)*N_particles + p
+                idx_curr = (t-1)*N_particles + p
+                # make sure we don't go past chunk
+                if idx_curr > n_chunk_records
+                    break
+                end
+        
+                dt_val = time_chunk[idx_curr] - time_chunk[idx_prev]
                 if dt_val > 0
-                    x_val = x_chunk[idx]
-                    y_val = y_chunk[idx]
+                    x_val = x_chunk[idx_curr]
+                    y_val = y_chunk[idx_curr]
                     x_bin = clamp(Int(floor((x_val - edges_x[1]) / grid_size)) + 1, 1, n_x)
                     y_bin = clamp(Int(floor((y_val - edges_y[1]) / grid_size)) + 1, 1, n_y)
                     @inbounds begin
