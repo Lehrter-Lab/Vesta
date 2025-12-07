@@ -89,19 +89,15 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
             
                 x_val = x_chunk[idx_curr]
                 y_val = y_chunk[idx_curr]
-                x_bin = searchsortedlast(edges_x, x_val) - 1
-                y_bin = searchsortedlast(edges_y, y_val) - 1
-            
-                in_bounds = (1 ≤ x_bin ≤ n_x && 1 ≤ y_bin ≤ n_y)
+                x_bin = clamp(floor(Int, (x_val - min_x) / grid_size) + 1, 1, n_x)
+                y_bin = clamp(floor(Int, (y_val - min_y) / grid_size) + 1, 1, n_y)
             
                 # If still in same cell: accumulate dt
-                if in_bounds && x_bin == prev_bin_x && y_bin == prev_bin_y
+                if x_bin == prev_bin_x && y_bin == prev_bin_y
                     accum_dt += dt_val
-            
-                # If entering a new valid cell:
-                elseif in_bounds
+                else
                     # Finalize previous visit if one existed
-                    if prev_bin_x != 0
+                    if prev_bin_x != 0 && prev_bin_y != 0
                         @inbounds begin
                             local_dt[prev_bin_x, prev_bin_y] += accum_dt
                             local_np[prev_bin_x, prev_bin_y] += 1
@@ -111,23 +107,11 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
                     prev_bin_x = x_bin
                     prev_bin_y = y_bin
                     accum_dt = dt_val
-            
-                # If leaving the grid:
-                else
-                    if prev_bin_x != 0
-                        @inbounds begin
-                            local_dt[prev_bin_x, prev_bin_y] += accum_dt
-                            local_np[prev_bin_x, prev_bin_y] += 1
-                        end
-                    end
-                    prev_bin_x = 0
-                    prev_bin_y = 0
-                    accum_dt = 0.0
                 end
             end
             
             # Finalize last visit at end of chunk
-            if prev_bin_x != 0
+            if prev_bin_x != 0 && prev_bin_y != 0
                 @inbounds begin
                     local_dt[prev_bin_x, prev_bin_y] += accum_dt
                     local_np[prev_bin_x, prev_bin_y] += 1
