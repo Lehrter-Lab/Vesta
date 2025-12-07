@@ -6,6 +6,7 @@ from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 import contextily as ctx
+from pathlib import Path
 
 
 # --------------------------------------------------------------------
@@ -68,14 +69,12 @@ def plot_heatmap(gdf, value_col, title, output_path,
 
     fig, ax = plt.subplots(figsize=(12, 8))
 
-    data.to_crs(crs).plot(
-        column=value_col,
-        ax=ax,
-        cmap=cmap,
-        edgecolor="none",
-        norm=norm,
-        legend=False
-    )
+    data.to_crs(crs).plot(column=value_col,
+                          ax=ax,
+                          cmap=cmap,
+                          edgecolor="none",
+                          norm=norm,
+                          legend=False)
 
     # Add basemap
     ctx.add_basemap(ax, crs=crs, source=ctx.providers.OpenStreetMap.Mapnik)
@@ -102,37 +101,30 @@ def plot_heatmap(gdf, value_col, title, output_path,
 
 
 # --------------------------------------------------------------------
-# Main
+# Call
 # --------------------------------------------------------------------
-def main():
-    csv_path = "particle_enhanced_proj.csv"
-    meta_path = "particle_enhanced_proj.meta.json"
+# Season
+name = "fall"
 
-    print("Loading grid...")
-    gdf = df_to_grid_gdf(csv_path, meta_path)
+# Dynamically build names
+csv_path   = f"{name}.csv"
+meta_path  = f"{name}.meta.json"
+mean_name  = f"{name}_mean_exp_time.png"
+total_name = f"{name}_total_exp_time.png"
 
-    print("Plotting mean exposure time…")
-    plot_heatmap(
-        gdf,
-        value_col="mean_exp_time",
-        title="Mean Exposure Time (hours)",
-        output_path="mean_exp_time.png",
-        log_scale=True,
-        colorbar_label="Hours"
-    )
+# Build gdf
+gdf = df_to_grid_gdf(csv_path, meta_path)
 
-    print("Plotting total exposure time…")
-    plot_heatmap(
-        gdf,
-        value_col="total_exp_time",
-        title="Total Exposure Time (hours)",
-        output_path="total_exp_time.png",
-        log_scale=True,
-        colorbar_label="Hours"
-    )
-
-    print("Done.")
-
-
-if __name__ == "__main__":
-    main()
+# Plots
+plot_heatmap(gdf,
+             value_col="mean_exp_time",
+             title="Mean Exposure Time (hours)",
+             output_path=mean_name,
+             log_scale=False,
+             colorbar_label="Hours")
+plot_heatmap(gdf,
+             value_col="total_exp_time",
+             title="Total Exposure Time (hours)",
+             output_path=total_name,
+             log_scale=True,
+             colorbar_label="Hours")
