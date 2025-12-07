@@ -27,7 +27,7 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     println("DEBUG: Processing in $total_chunks chunks of up to $chunk_size records each"); flush(stdout)
 
     # -------------------------
-    # Load coordinates
+    # Load coordinates and time
     # -------------------------
     x_all = ds["lon"][:]
     y_all = ds["lat"][:]
@@ -39,13 +39,37 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     edges_y = collect(min_y:grid_size:max_y)
     n_x, n_y = length(edges_x)-1, length(edges_y)-1
 
-    # Initialize buffers
-    dt_sum_cell        = zeros(Float64, n_x, n_y)
-    n_particles_cell   = zeros(Int,     n_x, n_y)
+    # -------------------------
+    # Load inside flags for particles from enhanced NetCDF
+    # -------------------------
+    inside_all = ds["inside"][:]
 
+    # Precompute first exit time per particle
+    first_exit_time_per_particle = fill(NaN, N_particles)
+    last_seen_inside = fill(false, N_particles)
+    for t in 1:t_steps
+        for p in 1:N_particles
+            idx = (t-1)*N_particles + p
+            inside_flag = inside_all[idx] == 1
+            if last_seen_inside[p] && !inside_flag && isnan(first_exit_time_per_particle[p])
+                first_exit_time_per_particle[p] = time_all[idx]
+            end
+            last_seen_inside[p] = inside_flag
+        end
+    end
+
+    # Particle starting positions (first timestep)
+    start_x = x_all[1:N_particles]
+    start_y = y_all[1:N_particles]
+
+    # -------------------------
+    # Initialize buffers
+    # -------------------------
+    dt_sum_cell      = zeros(Float64, n_x, n_y)
+    n_particles_cell = zeros(Int, n_x, n_y)
     nthreads = Threads.nthreads()
     master_dt = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
-    master_np = [zeros(Int,     n_x, n_y) for _ in 1:nthreads]
+    master_np = [zeros(Int, n_x, n_y) for _ in 1:nthreads]
 
     # -------------------------
     # Process chunks
@@ -62,55 +86,47 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
         n_chunk_records = stop_idx - start_idx + 1
         n_chunk_timesteps = ceil(Int, n_chunk_records / N_particles)
 
-        # -------------------------
-        # Process each particle instance sequentially
-        # -------------------------
         @threads for p in 1:N_particles
             tid = threadid()
             local_dt = master_dt[tid]
             local_np = master_np[tid]
 
-            # Track a particle’s current visit
             prev_bin_x = 0
             prev_bin_y = 0
             accum_dt = 0.0
-            
+
             for t in 2:n_chunk_timesteps
                 idx_prev = (t-2)*N_particles + p
                 idx_curr = (t-1)*N_particles + p
                 if idx_curr > n_chunk_records
                     break
                 end
-            
+
                 dt_val = time_chunk[idx_curr] - time_chunk[idx_prev]
                 if dt_val <= 0
                     continue
                 end
-            
+
                 x_val = x_chunk[idx_curr]
                 y_val = y_chunk[idx_curr]
                 x_bin = clamp(floor(Int, (x_val - min_x) / grid_size) + 1, 1, n_x)
                 y_bin = clamp(floor(Int, (y_val - min_y) / grid_size) + 1, 1, n_y)
-            
-                # If still in same cell: accumulate dt
+
                 if x_bin == prev_bin_x && y_bin == prev_bin_y
                     accum_dt += dt_val
                 else
-                    # Finalize previous visit if one existed
                     if prev_bin_x != 0 && prev_bin_y != 0
                         @inbounds begin
                             local_dt[prev_bin_x, prev_bin_y] += accum_dt
                             local_np[prev_bin_x, prev_bin_y] += 1
                         end
                     end
-                    # Start new visit
                     prev_bin_x = x_bin
                     prev_bin_y = y_bin
                     accum_dt = dt_val
                 end
             end
-            
-            # Finalize last visit at end of chunk
+
             if prev_bin_x != 0 && prev_bin_y != 0
                 @inbounds begin
                     local_dt[prev_bin_x, prev_bin_y] += accum_dt
@@ -123,12 +139,36 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     close(ds)
 
     # -------------------------
-    # Merge threads
+    # Merge thread results
     # -------------------------
     println("DEBUG: Merging thread results..."); flush(stdout)
     for tid in 1:nthreads
-        dt_sum_cell        .+= master_dt[tid]
-        n_particles_cell   .+= master_np[tid]
+        dt_sum_cell      .+= master_dt[tid]
+        n_particles_cell .+= master_np[tid]
+    end
+
+    # -------------------------
+    # Compute mean exit time per grid cell
+    # -------------------------
+    x_bins_start = clamp.(floor.(Int, (start_x .- min_x)/grid_size) .+ 1, 1, n_x)
+    y_bins_start = clamp.(floor.(Int, (start_y .- min_y)/grid_size) .+ 1, 1, n_y)
+
+    sum_exit = zeros(Float64, n_x, n_y)
+    count_exit = zeros(Int, n_x, n_y)
+
+    for p in 1:N_particles
+        xi, yi = x_bins_start[p], y_bins_start[p]
+        if !isnan(first_exit_time_per_particle[p])
+            sum_exit[xi, yi] += first_exit_time_per_particle[p]
+            count_exit[xi, yi] += 1
+        end
+    end
+
+    mean_exit_cell = fill(NaN, n_x, n_y)
+    for xi in 1:n_x, yi in 1:n_y
+        if count_exit[xi, yi] > 0
+            mean_exit_cell[xi, yi] = sum_exit[xi, yi] / count_exit[xi, yi]
+        end
     end
 
     # -------------------------
@@ -136,7 +176,7 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     println("DEBUG: Total particle counts in grid: ", sum(n_particles_cell))
     println("DEBUG: Max dt_sum in grid: ", maximum(dt_sum_cell))
-        
+
     rows = Vector{NamedTuple}(undef, n_x * n_y)
     k = 1
     for xi in 1:n_x, yi in 1:n_y
@@ -144,12 +184,13 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
         np_val = n_particles_cell[xi, yi]
         mean_val = np_val > 0 ? dt_val / np_val : NaN
         total_val = np_val > 0 ? dt_val : NaN
-    
+
         rows[k] = (x_bin = xi, y_bin = yi,
                    dt_sum = dt_val,
                    n_particles = np_val,
                    mean_exp_time = mean_val,
-                   total_exp_time = total_val)
+                   total_exp_time = total_val,
+                   mean_time_to_exit = mean_exit_cell[xi, yi])
         k += 1
     end
 
