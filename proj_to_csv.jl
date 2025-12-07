@@ -195,7 +195,7 @@ function main()
     println("DEBUG: Parsed args = $(args)"); flush(stdout)
   
     defaults = Dict("ncfile" => "particle_enhanced_proj.nc",
-                "grid_size" => "2500.0",
+                "grid_size" => "1000.0",
                 "timesteps_per_chunk" => "10")
 
     input_dict = Dict{String,String}()
