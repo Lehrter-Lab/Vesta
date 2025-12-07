@@ -70,27 +70,67 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
             local_dt = master_dt[tid]
             local_np = master_np[tid]
 
+            # Track a particle’s current visit
+            prev_bin_x = 0
+            prev_bin_y = 0
+            accum_dt = 0.0
+            
             for t in 2:n_chunk_timesteps
                 idx_prev = (t-2)*N_particles + p
                 idx_curr = (t-1)*N_particles + p
                 if idx_curr > n_chunk_records
                     break
                 end
-
+            
                 dt_val = time_chunk[idx_curr] - time_chunk[idx_prev]
-                if dt_val > 0
-                    x_val = x_chunk[idx_curr]
-                    y_val = y_chunk[idx_curr]
-
-                    # FIX: use proper binning with searchsortedlast
-                    x_bin = searchsortedlast(edges_x, x_val) - 1
-                    y_bin = searchsortedlast(edges_y, y_val) - 1
-                    if 1 ≤ x_bin ≤ n_x && 1 ≤ y_bin ≤ n_y
+                if dt_val <= 0
+                    continue
+                end
+            
+                x_val = x_chunk[idx_curr]
+                y_val = y_chunk[idx_curr]
+                x_bin = searchsortedlast(edges_x, x_val) - 1
+                y_bin = searchsortedlast(edges_y, y_val) - 1
+            
+                in_bounds = (1 ≤ x_bin ≤ n_x && 1 ≤ y_bin ≤ n_y)
+            
+                # If still in same cell: accumulate dt
+                if in_bounds && x_bin == prev_bin_x && y_bin == prev_bin_y
+                    accum_dt += dt_val
+            
+                # If entering a new valid cell:
+                elseif in_bounds
+                    # Finalize previous visit if one existed
+                    if prev_bin_x != 0
                         @inbounds begin
-                            local_dt[x_bin, y_bin] += dt_val
-                            local_np[x_bin, y_bin] += 1
+                            local_dt[prev_bin_x, prev_bin_y] += accum_dt
+                            local_np[prev_bin_x, prev_bin_y] += 1
                         end
                     end
+                    # Start new visit
+                    prev_bin_x = x_bin
+                    prev_bin_y = y_bin
+                    accum_dt = dt_val
+            
+                # If leaving the grid:
+                else
+                    if prev_bin_x != 0
+                        @inbounds begin
+                            local_dt[prev_bin_x, prev_bin_y] += accum_dt
+                            local_np[prev_bin_x, prev_bin_y] += 1
+                        end
+                    end
+                    prev_bin_x = 0
+                    prev_bin_y = 0
+                    accum_dt = 0.0
+                end
+            end
+            
+            # Finalize last visit at end of chunk
+            if prev_bin_x != 0
+                @inbounds begin
+                    local_dt[prev_bin_x, prev_bin_y] += accum_dt
+                    local_np[prev_bin_x, prev_bin_y] += 1
                 end
             end
         end
