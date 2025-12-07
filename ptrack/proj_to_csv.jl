@@ -220,8 +220,8 @@ function main()
     println("DEBUG: Parsed args = $(args)"); flush(stdout)
   
     defaults = Dict("ncfile" => "particle_enhanced_proj.nc",
-                "grid_size" => "1000.0",
-                "timesteps_per_chunk" => "10")
+                    "grid_size" => "1000.0",
+                    "timesteps_per_chunk" => "10")
 
     input_dict = Dict{String,String}()
     for arg in args
@@ -237,12 +237,17 @@ function main()
     timesteps_per_chunk = parse(Int, params["timesteps_per_chunk"])
     println("DEBUG: Running with ncfile=$ncfile grid=$grid_size timesteps_per_chunk=$timesteps_per_chunk"); flush(stdout)
 
-    csv_path  = replace(ncfile, ".nc" => ".csv")
-    meta_path = replace(ncfile, ".nc" => ".meta.json")
+    df = compute_local_data(ncfile; grid_size=grid_size, timesteps_per_chunk=timesteps_per_chunk)
 
-    println("DEBUG: Running compute_local_data..."); flush(stdout)
-    compute_local_data(ncfile; grid_size=grid_size, timesteps_per_chunk=timesteps_per_chunk)
-    
+    # -------------------------
+    # Quick debug checks
+    # -------------------------
+    println("DEBUG: Sample of mean_time_to_exit column:")
+    println(first(df[:, [:x_bin, :y_bin, :mean_time_to_exit]], 10))
+
+    n_cells_with_exit = count(!isnan, df.mean_time_to_exit)
+    println("DEBUG: Grid cells with valid exit times: $n_cells_with_exit / $(nrow(df))")
+
     println("DEBUG: All done."); flush(stdout)
 end
 
