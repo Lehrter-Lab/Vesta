@@ -12,7 +12,7 @@ import os
 # --------------------------------------------------------------------
 # Convert Julia CSV + meta.json → GeoDataFrame with polygons
 # --------------------------------------------------------------------
-def df_to_grid_gdf(csv_path, meta_path, value_col=None, crs="EPSG:5070"):
+def df_to_gdf(csv_path, meta_path, value_col=None, crs="EPSG:5070"):
     df = pd.read_csv(csv_path)
     with open(meta_path, "r") as f:
         meta = json.load(f)
@@ -51,7 +51,7 @@ def compute_seasonal_variability(csvs, value_col="mean_exp_time", ref_season="fa
     Returns a GeoDataFrame with polygons and variability (std_dev) per grid cell.
     """
     # Load reference grid
-    ref_gdf = df_to_grid_gdf(csvs[ref_season], f"{ref_season}.meta.json", value_col=None)
+    ref_gdf = df_to_gdf(csvs[ref_season], f"{ref_season}.meta.json", value_col=None)
     ref_gdf = ref_gdf.set_index(["x_bin", "y_bin"])
     
     seasonal_values = {}
@@ -59,7 +59,7 @@ def compute_seasonal_variability(csvs, value_col="mean_exp_time", ref_season="fa
     # Load each season and align to reference grid
     for season, csv_path in csvs.items():
         meta_path = f"{season}.meta.json"
-        gdf = df_to_grid_gdf(csv_path, meta_path, value_col=value_col)
+        gdf = df_to_gdf(csv_path, meta_path, value_col=value_col)
         gdf_idxed = gdf.set_index(["x_bin", "y_bin"])
         
         # Join seasonal values to reference grid
@@ -80,13 +80,16 @@ def compute_seasonal_variability(csvs, value_col="mean_exp_time", ref_season="fa
 # --------------------------------------------------------------------
 # Your heatmap function (unchanged, slightly cleaned)
 # --------------------------------------------------------------------
-def plot_heatmap(gdf, value_col, title, output_path,
+def plot_heatmap(gdf, value_col, output_path,
+                 title="",
                  crs="EPSG:4326",
                  cmap="viridis",
                  log_scale=True,
                  colorbar_label=None,
                  seconds=86400,
-                 extent=None):
+                 extent=None,
+                 vmin=None,
+                 vmax=None):
 
     data = gdf.copy()
 
@@ -96,16 +99,17 @@ def plot_heatmap(gdf, value_col, title, output_path,
         
     data = data[~data[value_col].isna()]
     data = data[data[value_col] > 0]
-    vmin = data[value_col].min()
-    vmax = data[value_col].max()
     
+    # Color bar range
+    vmin = vmin if vmin is not None else data[value_col].min()
+    vmax = vmax if vmax is not None else data[value_col].max()
     if log_scale:
         norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
     else:
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
 
+    # Plot data on fig
     fig, ax = plt.subplots(figsize=(12, 8))
-
     data.to_crs(crs).plot(column=value_col,
                           ax=ax,
                           cmap=cmap,
@@ -147,6 +151,9 @@ def plot_heatmap(gdf, value_col, title, output_path,
         spine.set_edgecolor('black')
         spine.set_linewidth(1)
         
+    fig.tight_layout()
+    fig.subplots_adjust(left=0.1)
+        
     plt.title(title)
     plt.tight_layout()
     plt.savefig(output_path, dpi=300)
@@ -164,43 +171,64 @@ value_cols = [("mean_time_to_exit", "Mean Residence Time (hours)", "res"),
               ("mean_exp_time", "Mean Exposure Time (hours)", "exp")]
 
 # Get extent for long island
-ref = df_to_grid_gdf("fall.csv", "fall.meta.json", value_col=None)
-ref = ref.to_crs("EPSG:4326")
+ref = df_to_gdf("fall.csv", "fall.meta.json", value_col=None).to_crs("EPSG:4326")
 xmin, ymin, xmax, ymax = ref.total_bounds
 domain = (xmin*1.0005, xmax, ymin, ymax*0.995)
 # Get extent for peconic
-ref = df_to_grid_gdf("fall.csv", "fall.meta.json", value_col="mean_time_to_exit")
-ref = ref.to_crs("EPSG:4326")
+ref = df_to_gdf("fall.csv", "fall.meta.json", value_col="mean_time_to_exit").to_crs("EPSG:4326")
 xmin, ymin, xmax, ymax = ref.total_bounds
 zoom = (xmin*1.0005, xmax*0.9995, ymin*0.9995, ymax*1.0005)
 
+# Get colorbar range
+cbars= {}
+for col, _, _ in value_cols:
+    all_vals = []
+    for season in seasons:
+        gdf = df_to_gdf(f"{season}.csv", f"{season}.meta.json", value_col=col)
+        all_vals.append(gdf[col].dropna().values)
+    all_vals   = np.concatenate(all_vals)
+    cbars[col] = (all_vals.min(), all_vals.max())
+    print(f"{col} global range: {cbars[col][0]:.2f} : {cbars[col][1]:.2f}")
+
+
 # Loop over seasons and value types
 for season in seasons:
-    csv_path = f"{season}.csv"
+    csv_path  = f"{season}.csv"
     meta_path = f"{season}.meta.json"
     
     for col, title, suffix in value_cols:
         if suffix == "res":
             extent = zoom
+            seconds = 86400
+            cbar    = (None,None)
+            # cbar    = (cbars[col][0] / seconds, 
+            #            cbars[col][1] / seconds)
         else:
-            extent = domain
-        gdf = df_to_grid_gdf(csv_path, meta_path, value_col=col)
+            extent  = domain
+            seconds = 3600
+            cbar    = (cbars[col][0] / seconds, 
+                       cbars[col][1] / seconds)
+        gdf = df_to_gdf(csv_path, meta_path, value_col=col)
         output_path = f"figures/{season}_mean_{suffix}_time.png"
         plot_heatmap(gdf,
                      value_col=col,
-                     title=title,
+                     #title=title,
                      output_path=output_path,
                      log_scale=False,
-                     colorbar_label="Days",
-                     extent=extent)
+                     colorbar_label="",
+                     seconds=seconds,
+                     extent=extent,
+                     vmin=cbar[0],
+                     vmax=cbar[1])
 
 # Seasonal variability
 csvs = {season: f"{season}.csv" for season in seasons}
 gdf_var = compute_seasonal_variability(csvs, value_col="mean_exp_time")
 plot_heatmap(gdf_var,
              value_col="range",
-             title="Seasonal Variability in Mean Exposure Time",
+             #title="Seasonal Variability in Mean Exposure Time",
              output_path="figures/seasonal_variability.png",
              log_scale=False,
-             colorbar_label="Days",
+             colorbar_label="",
+             seconds=seconds,
              extent=extent)
