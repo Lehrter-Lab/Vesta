@@ -16,7 +16,7 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     wrap_idx = findfirst(diff(pid_all) .< 0)
     N_particles = wrap_idx
-    t_steps = N_records / N_particles
+    t_steps = div(N_records, N_particles)
     println("DEBUG: Detected $N_particles particles per timestep over $t_steps timesteps"); flush(stdout)
 
     # -------------------------
