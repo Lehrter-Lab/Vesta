@@ -44,19 +44,32 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     inside_all = ds["inside"][:]
 
-    # Precompute first exit time per particle
-    first_exit_time_per_particle = fill(NaN, N_particles)
-    last_seen_inside = fill(false, N_particles)
+    t_enter = fill(NaN, N_particles)
+    t_exit  = fill(NaN, N_particles)
+    
+    last_flag = fill(false, N_particles)
+    
     for t in 1:t_steps
         for p in 1:N_particles
             idx = (t-1)*N_particles + p
             inside_flag = inside_all[idx] == 1
-            if last_seen_inside[p] && !inside_flag && isnan(first_exit_time_per_particle[p])
-                first_exit_time_per_particle[p] = time_all[idx]
+            t_now = time_all[idx]
+    
+            # detect first entry
+            if inside_flag && !last_flag[p] && isnan(t_enter[p])
+                t_enter[p] = t_now
             end
-            last_seen_inside[p] = inside_flag
+    
+            # detect first exit *after* entry
+            if last_flag[p] && !inside_flag && isnan(t_exit[p])
+                t_exit[p] = t_now
+            end
+    
+            last_flag[p] = inside_flag
         end
     end
+
+    elapsed_exit = t_exit .- t_enter
 
     # Particle starting positions (first timestep)
     start_x = x_all[1:N_particles]
@@ -158,8 +171,8 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
 
     for p in 1:N_particles
         xi, yi = x_bins_start[p], y_bins_start[p]
-        if !isnan(first_exit_time_per_particle[p])
-            sum_exit[xi, yi] += first_exit_time_per_particle[p]
+        if !isnan(elapsed_exit[p])
+            sum_exit[xi, yi] += elapsed_exit[p]
             count_exit[xi, yi] += 1
         end
     end
