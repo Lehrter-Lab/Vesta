@@ -44,32 +44,35 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     inside_all = ds["inside"][:]
 
-    t_enter = fill(NaN, N_particles)
-    t_exit  = fill(NaN, N_particles)
+    # Determine timestep size (assume constant)
+    dt = time_all[2] - time_all[1]  # seconds per timestep
     
-    last_flag = fill(false, N_particles)
+    # Initialize arrays to store first entry/exit steps
+    t_enter_step = fill(0, N_particles)
+    t_exit_step  = fill(0, N_particles)
+    last_flag    = fill(false, N_particles)
     
     for t in 1:t_steps
         for p in 1:N_particles
             idx = (t-1)*N_particles + p
             inside_flag = inside_all[idx] == 1
-            t_now = time_all[idx]
     
-            # detect first entry
-            if inside_flag && !last_flag[p] && isnan(t_enter[p])
-                t_enter[p] = t_now
+            # Detect first entry
+            if inside_flag && !last_flag[p] && t_enter_step[p] == 0
+                t_enter_step[p] = t
             end
     
-            # detect first exit *after* entry
-            if last_flag[p] && !inside_flag && isnan(t_exit[p])
-                t_exit[p] = t_now
+            # Detect first exit after entry
+            if last_flag[p] && !inside_flag && t_exit_step[p] == 0 && t_enter_step[p] > 0
+                t_exit_step[p] = t
             end
     
             last_flag[p] = inside_flag
         end
     end
-
-    elapsed_exit = t_exit .- t_enter
+    
+    # Compute elapsed time in seconds
+    elapsed_exit = (t_exit_step .- t_enter_step) .* dt
 
     # Particle starting positions (first timestep)
     start_x = x_all[1:N_particles]
