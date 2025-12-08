@@ -45,7 +45,8 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     inside_all = ds["inside"][:]
 
     # Determine timestep size (assume constant)
-    dt = time_all[2] - time_all[1]  # seconds per timestep
+    unique_times = unique(time_all)
+    dt = unique_times[2] - unique_times[1]
     
     # Initialize arrays to store first entry/exit steps
     t_enter_step = fill(0, N_particles)
