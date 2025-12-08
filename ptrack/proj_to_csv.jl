@@ -167,8 +167,8 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     # Compute mean exit time per grid cell
     # -------------------------
-    x_bins_start = clamp.(floor.(Int, (start_x .- min_x)/grid_size) .+ 1, 1, n_x)
-    y_bins_start = clamp.(floor.(Int, (start_y .- min_y)/grid_size) .+ 1, 1, n_y)
+    x_bins_start = Int.(clamp.(floor.((start_x .- min_x)/grid_size) .+ 1, 1, n_x))
+    y_bins_start = Int.(clamp.(floor.((start_y .- min_y)/grid_size) .+ 1, 1, n_y))
 
     sum_exit = zeros(Float64, n_x, n_y)
     count_exit = zeros(Int, n_x, n_y)
