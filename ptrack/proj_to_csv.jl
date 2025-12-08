@@ -6,38 +6,38 @@ using FilePathsBase
 
 function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_size::Float64=2000.0)
     println("DEBUG: Opening NetCDF file $ncfile"); flush(stdout)
-    ds = NCDataset(ncfile, "r")
+    ds        = NCDataset(ncfile, "r")
     N_records = length(ds["pid"])
-    pid_all = ds["pid"][:]
+    pid_all   = ds["pid"][:]
 
     # -------------------------
     # Determine number of particles and timesteps
     # Assumption: pid is sequential from 1 to max(pid) and repeats each timestep
     # -------------------------
-    wrap_idx = findfirst(diff(pid_all) .< 0)
+    wrap_idx    = findfirst(diff(pid_all) .< 0)
     N_particles = wrap_idx
-    t_steps = div(N_records, N_particles)
+    t_steps     = div(N_records, N_particles)
     println("DEBUG: Detected $N_particles particles per timestep over $t_steps timesteps"); flush(stdout)
 
     # -------------------------
     # Determine chunk size based on timesteps_per_chunk
     # -------------------------
-    chunk_size = N_particles * timesteps_per_chunk
+    chunk_size   = N_particles * timesteps_per_chunk
     total_chunks = ceil(Int, N_records / chunk_size)
     println("DEBUG: Processing in $total_chunks chunks of up to $chunk_size records each"); flush(stdout)
 
     # -------------------------
     # Load coordinates and time
     # -------------------------
-    x_all = ds["lon"][:]
-    y_all = ds["lat"][:]
+    x_all    = ds["lon"][:]
+    y_all    = ds["lat"][:]
     time_all = ds["time"][:]
 
     min_x, max_x = extrema(x_all)
     min_y, max_y = extrema(y_all)
-    edges_x = collect(min_x:grid_size:max_x)
-    edges_y = collect(min_y:grid_size:max_y)
-    n_x, n_y = length(edges_x)-1, length(edges_y)-1
+    edges_x      = collect(min_x:grid_size:max_x)
+    edges_y      = collect(min_y:grid_size:max_y)
+    n_x, n_y     = length(edges_x)-1, length(edges_y)-1
 
     # -------------------------
     # Load inside flags for particles from enhanced NetCDF
@@ -55,7 +55,7 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     
     for t in 1:t_steps
         for p in 1:N_particles
-            idx = (t-1)*N_particles + p
+            idx         = (t-1)*N_particles + p
             inside_flag = inside_all[idx] == 1
     
             # Detect first entry
@@ -73,7 +73,15 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     end
     
     # Compute elapsed time in seconds
-    elapsed_exit = (t_exit_step .- t_enter_step) .* dt
+    elapsed_exit = zeros(Float64, N_particles)
+    for p in 1:N_particles
+        if t_enter_step[p] > 0 && t_exit_step[p] > 0
+            elapsed_exit[p] = (t_exit_step[p] - t_enter_step[p]) * dt
+        else
+            # Particle never entered or never exited: mark as NaN
+            elapsed_exit[p] = NaN
+        end
+    end
 
     # Particle starting positions (first timestep)
     start_x = x_all[1:N_particles]
@@ -84,9 +92,9 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     # -------------------------
     dt_sum_cell      = zeros(Float64, n_x, n_y)
     n_particles_cell = zeros(Int, n_x, n_y)
-    nthreads = Threads.nthreads()
-    master_dt = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
-    master_np = [zeros(Int, n_x, n_y) for _ in 1:nthreads]
+    nthreads         = Threads.nthreads()
+    master_dt        = [zeros(Float64, n_x, n_y) for _ in 1:nthreads]
+    master_np        = [zeros(Int, n_x, n_y) for _ in 1:nthreads]
 
     # -------------------------
     # Process chunks
@@ -100,17 +108,17 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
         y_chunk    = y_all[start_idx:stop_idx]
         time_chunk = time_all[start_idx:stop_idx]
 
-        n_chunk_records = stop_idx - start_idx + 1
+        n_chunk_records   = stop_idx - start_idx + 1
         n_chunk_timesteps = ceil(Int, n_chunk_records / N_particles)
 
         @threads for p in 1:N_particles
-            tid = threadid()
+            tid      = threadid()
             local_dt = master_dt[tid]
             local_np = master_np[tid]
 
             prev_bin_x = 0
             prev_bin_y = 0
-            accum_dt = 0.0
+            accum_dt   = 0.0
 
             for t in 2:n_chunk_timesteps
                 idx_prev = (t-2)*N_particles + p
@@ -170,7 +178,7 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     x_bins_start = Int.(clamp.(floor.((start_x .- min_x)/grid_size) .+ 1, 1, n_x))
     y_bins_start = Int.(clamp.(floor.((start_y .- min_y)/grid_size) .+ 1, 1, n_y))
 
-    sum_exit = zeros(Float64, n_x, n_y)
+    sum_exit   = zeros(Float64, n_x, n_y)
     count_exit = zeros(Int, n_x, n_y)
 
     for p in 1:N_particles
@@ -197,9 +205,9 @@ function compute_local_data(ncfile::String; timesteps_per_chunk::Int=10, grid_si
     rows = Vector{NamedTuple}(undef, n_x * n_y)
     k = 1
     for xi in 1:n_x, yi in 1:n_y
-        dt_val = dt_sum_cell[xi, yi]
-        np_val = n_particles_cell[xi, yi]
-        mean_val = np_val > 0 ? dt_val / np_val : NaN
+        dt_val    = dt_sum_cell[xi, yi]
+        np_val    = n_particles_cell[xi, yi]
+        mean_val  = np_val > 0 ? dt_val / np_val : NaN
         total_val = np_val > 0 ? dt_val : NaN
 
         rows[k] = (x_bin = xi, y_bin = yi,
