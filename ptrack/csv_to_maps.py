@@ -136,7 +136,7 @@ def plot_heatmap(gdf, value_col, output_path,
         norm = mcolors.Normalize(vmin=vmin, vmax=vmax)
 
     # Plot data on fig
-    fig, ax = plt.subplots(figsize=(16, 11))
+    fig, ax = plt.subplots(figsize=(16, 10))
     data.to_crs(crs).plot(column=value_col,
                           ax=ax,
                           cmap=cmap,
@@ -152,16 +152,18 @@ def plot_heatmap(gdf, value_col, output_path,
         ax.set_ylim(ymin, ymax)
         
     # Add basemap
-    ctx.add_basemap(ax, crs=crs, 
-                    source=ctx.providers.CartoDB.PositronNoLabels, zoom=15)
+    source = ctx.providers.CartoDB.PositronNoLabels
+    ctx.add_basemap(ax, crs=crs, source=source,
+                    zoom=12, attribution=False)
     
     # Get axes for cbar mapping
     divider = make_axes_locatable(ax)
-    cax     = divider.append_axes("right", size="3%", pad=-1.2)
+    cax     = divider.append_axes("right", size="3%", pad=-1.8)
 
     # Colorbar
     sm   = plt.cm.ScalarMappable(cmap=cmap, norm=norm)
     cbar = fig.colorbar(sm, cax=cax)
+    cbar.ax.tick_params(labelsize=16)
     
     if log_scale:
         ticks = [vmin, np.sqrt(vmin * vmax), vmax]
@@ -173,9 +175,9 @@ def plot_heatmap(gdf, value_col, output_path,
     
     # Add ticks
     ax.set_axis_on()
-    ax.tick_params(axis='both', which='major', labelsize=10, color='black', length=5)
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
+    ax.tick_params(axis='both', which='major', labelsize=16, color='black', length=5)
+    ax.set_xlabel("")
+    ax.set_ylabel("")
     
     # Add a black border around plot area
     for spine in ax.spines.values():
@@ -185,17 +187,15 @@ def plot_heatmap(gdf, value_col, output_path,
     # Add season annotation in top-left corner
     ax.text(0.025, 0.97, title, 
             transform=ax.transAxes,   # Use axes coordinates (0 to 1)
-            fontsize=20, 
+            fontsize=24, 
             fontweight='bold',
             va='top',                 # vertical alignment
             ha='left',                # horizontal alignment
             color='black')
-    
-    fig.tight_layout()
         
     plt.title("")
     plt.tight_layout()
-    plt.savefig(output_path, dpi=450)
+    plt.savefig(output_path, dpi=900)
     plt.close()
 
 # --------------------------------------------------------------------
@@ -231,8 +231,9 @@ def plot_quad_heatmap(seasons, csv_base, value_col, extent, cmap="viridis",
         ax.set_ylim(ymin, ymax)
         
         # Basemap
-        ctx.add_basemap(ax, crs="EPSG:4326", source=ctx.providers.CartoDB.PositronNoLabels)
-        
+        source = ctx.providers.CartoDB.PositronNoLabels
+        ctx.add_basemap(ax, crs="EPSG:4326", source=source,
+                        zoom=12, attribution=False)
         # Annotation
         ax.text(0.025, 0.97, season.capitalize(),
                 transform=ax.transAxes, fontsize=18, fontweight='bold',
@@ -261,18 +262,21 @@ def plot_quad_heatmap(seasons, csv_base, value_col, extent, cmap="viridis",
 os.makedirs("figures", exist_ok=True)
 
 # Inputs
-seasons = ["winter", "spring", "summer", "fall"]
+seasons    = ["winter", "spring", "summer", "fall"]
 value_cols = [("mean_time_to_exit", "Mean Residence Time (hours)", "res"),
               ("mean_exp_time", "Mean Exposure Time (hours)", "exp")]
 
 # Get extent for long island
-ref = df_to_gdf("fall.csv", "fall.meta.json", value_col=None).to_crs("EPSG:4326")
+ref                    = df_to_gdf("fall.csv", "fall.meta.json", 
+                                   value_col=None).to_crs("EPSG:4326")
 xmin, ymin, xmax, ymax = ref.total_bounds
-domain = (xmin*1.0005, xmax, ymin, ymax*0.995)
-# Get extent for peconic
-ref = df_to_gdf("fall.csv", "fall.meta.json", value_col="mean_time_to_exit").to_crs("EPSG:4326")
+domain                 = (xmin*1.0005, xmax, ymin, ymax*0.995)
+
+# Get extent for Peconic
+ref                    = df_to_gdf("fall.csv", "fall.meta.json", 
+                                   value_col="mean_time_to_exit").to_crs("EPSG:4326")
 xmin, ymin, xmax, ymax = ref.total_bounds
-zoom = (xmin*1.0005, xmax*0.9995, ymin*0.9995, ymax*1.0005)
+zoom                   = (xmin*1.0005, xmax*0.9995, ymin*0.9995, ymax*1.0005)
 
 # Get colorbar range
 cbars= {}
@@ -316,7 +320,8 @@ for season in seasons:
                      extent=extent,
                      vmin=cbar[0],
                      vmax=cbar[1])
-
+        print("Plotted to: ", output_path)
+        
 # Seasonal variability
 csvs = {season: f"{season}.csv" for season in seasons}
 for col in ["mean_time_to_exit", "mean_exp_time"]:
