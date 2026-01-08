@@ -2,7 +2,7 @@
 
 This repository contains backups of essential inputs for the Vesta model as well as scripts to handle mesh validation and model outputs
 
-ptrack4.1 is identical to ptrack 4 with the exception of its output. ptrack4.1 includes the element that the particle is in for faster pos-processing of local residence times.
+**ptrack4.1** is identical to **ptrack4** with the exception of its output. ptrack4.1 includes the element that the particle is in for faster pos-processing of local residence times.
 
 ## Mesh Generation and Validation
 ### mesh_cfl_calculator
