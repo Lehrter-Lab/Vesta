@@ -1,12 +1,13 @@
-function subdomain_gr3(infile)
-	lines = readlines(filename)
+function compute_inside(elements,ingrid)
+	lines = readlines(ingrid)
     # Second line has ne np
     ne, np = parse.(Int, split(lines[2]))
     # Element lines start after the nodes
     ele_lines = lines[2 + np + 1 : 2 + np + ne]
     # Extract element IDs
     ele = [parse(Int, split(line)[1]) for line in ele_lines]
-    return ele
+	subdomain = Set(ele)
+    return in.(elements, Ref(subdomain))
 
 open(pth_file,"r") do io
         while !eof(io)
@@ -35,7 +36,7 @@ open(pth_file,"r") do io
                 timev[i]  = time_sec
                 max_pid   = max(max_pid,pidv[i])
             end
-            inside_flags = compute_inside(lonv, latv, domain_geom)
+            inside_flags = compute_inside(elev, domain_geom)
             next_idx     = append_timestep!(ds_enh, vars, pidv, lonv, latv, depthv, timev, inside_flags, next_idx)
             @info "Wrote timestep $(time_sec) n_particles=$(n_particles)"
         end
