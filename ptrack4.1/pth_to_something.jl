@@ -15,12 +15,13 @@ function init_enhanced_nc(file::String; compress=4)
     ds = NCDataset(file, "c")
     defDim(ds, "point", Inf)
     v_pid    = defVar(ds, "pid", Int32, ("point",))
+	v_ele    = defVar(ds, "ele", Int32, ("point",))
     v_lon    = defVar(ds, "lon", Float32, ("point",); deflatelevel=compress, shuffle=true)
     v_lat    = defVar(ds, "lat", Float32, ("point",); deflatelevel=compress, shuffle=true)
     v_depth  = defVar(ds, "depth", Float32, ("point",); deflatelevel=compress, shuffle=true)
     v_time   = defVar(ds, "time", Float64, ("point",); deflatelevel=compress, shuffle=true)
     v_inside = defVar(ds, "inside", UInt8, ("point",); deflatelevel=compress, shuffle=true)
-    return ds, (v_pid,v_lon,v_lat,v_depth,v_time,v_inside)
+    return ds, (v_pid,v_ele,v_lon,v_lat,v_depth,v_time,v_inside)
 end
 	
 # Append a timestep to NetCDF
