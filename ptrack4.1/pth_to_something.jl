@@ -1,3 +1,4 @@
+# Use hgrid subset to find bool for inside relevant domain
 function compute_inside(elements,ingrid)
 	lines = readlines(ingrid)
     # Second line has ne np
@@ -8,7 +9,36 @@ function compute_inside(elements,ingrid)
     ele = [parse(Int, split(line)[1]) for line in ele_lines]
 	subdomain = Set(ele)
     return in.(elements, Ref(subdomain))
-
+	
+# Initialize enhanced NetCDF
+function init_enhanced_nc(file::String; compress=4)
+    ds = NCDataset(file, "c")
+    defDim(ds, "point", Inf)
+    v_pid    = defVar(ds, "pid", Int32, ("point",))
+    v_lon    = defVar(ds, "lon", Float32, ("point",); deflatelevel=compress, shuffle=true)
+    v_lat    = defVar(ds, "lat", Float32, ("point",); deflatelevel=compress, shuffle=true)
+    v_depth  = defVar(ds, "depth", Float32, ("point",); deflatelevel=compress, shuffle=true)
+    v_time   = defVar(ds, "time", Float64, ("point",); deflatelevel=compress, shuffle=true)
+    v_inside = defVar(ds, "inside", UInt8, ("point",); deflatelevel=compress, shuffle=true)
+    return ds, (v_pid,v_lon,v_lat,v_depth,v_time,v_inside)
+end
+	
+# Append a timestep to NetCDF
+function append_timestep!(ds::NCDataset, vars, pidv, elev, lonv, latv, depthv, timev, insidev, start_idx::Int)
+    n = length(pidv)
+    end_idx = start_idx + n - 1
+    v_pid,v_lon,v_lat,v_depth,v_time,v_inside = vars
+    v_pid[start_idx:end_idx]    = Int32.(pidv)
+	v_ele[start_idx:end_idx]    = Int32.(elev)	
+    v_lon[start_idx:end_idx]    = Float32.(lonv)
+    v_lat[start_idx:end_idx]    = Float32.(latv)
+    v_depth[start_idx:end_idx]  = Float32.(depthv)
+    v_time[start_idx:end_idx]   = Float64.(timev)
+    v_inside[start_idx:end_idx] = UInt8.(insidev)
+    return end_idx + 1
+end
+	
+# Read .pth file
 open(pth_file,"r") do io
         while !eof(io)
 			# Handle header
@@ -37,7 +67,7 @@ open(pth_file,"r") do io
                 max_pid   = max(max_pid,pidv[i])
             end
             inside_flags = compute_inside(elev, domain_geom)
-            next_idx     = append_timestep!(ds_enh, vars, pidv, lonv, latv, depthv, timev, inside_flags, next_idx)
+            next_idx     = append_timestep!(ds_enh, vars, pidv, elev, lonv, latv, depthv, timev, inside_flags, next_idx)
             @info "Wrote timestep $(time_sec) n_particles=$(n_particles)"
         end
     end
